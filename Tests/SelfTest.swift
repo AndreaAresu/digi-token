@@ -72,6 +72,9 @@ enum SelfTest {
         section("Save compatibility")
         testSaveCompatibility()
 
+        section("Coach")
+        testCoach()
+
         section("Real logs on this machine")
         await testRealLogs()
 
@@ -721,8 +724,162 @@ enum SelfTest {
         expect((0...1).contains(progress), "progress stays bounded (\(progress))")
     }
 
+    /// The coach has to stay quiet at a tamer who is already working well.
+    ///
+    /// Thresholds were set against the real profile on the machine this was
+    /// written on — 97% cache share, 43x amortisation, a 400K median session —
+    /// and the point of pinning it here is that a future retune cannot start
+    /// nagging that tamer without a test going red.
+    static func testCoach() {
+        func event(
+            model: String, session: String, key: String,
+            input: Int = 0, output: Int = 0, write: Int = 0, read: Int = 0
+        ) -> UsageEvent {
+            UsageEvent(
+                timestamp: Date(),
+                model: model,
+                counts: TokenCounts(
+                    input: input, output: output, cacheCreation: write, cacheRead: read
+                ),
+                dedupKey: key,
+                sessionID: session,
+                project: "demo"
+            )
+        }
+
+        func fired(_ report: CoachReport, _ id: String) -> Bool {
+            report.advice.contains { $0.id == id }
+        }
+
+        // Not enough history to describe a habit.
+        let thin = (0..<3).map {
+            event(model: "claude-opus-5", session: "s\($0)", key: "k\($0)", input: 1_000, output: 500)
+        }
+        let thinReport = Coach.report(events: thin)
+        expect(thinReport.isTooEarly, "three sessions is too early to advise")
+        expect(thinReport.advice.isEmpty, "nothing is claimed before there is data")
+
+        // The shape of a tamer who works well: heavy cache reuse, long sessions.
+        let healthy = (0..<12).map {
+            event(
+                model: "claude-opus-5", session: "s\($0)", key: "h\($0)",
+                input: 20_000, output: 150_000, write: 750_000, read: 32_000_000
+            )
+        }
+        let healthyReport = Coach.report(events: healthy)
+        expect(!healthyReport.isTooEarly, "twelve busy sessions is enough to judge")
+        expect(
+            healthyReport.advice.isEmpty,
+            "an efficient tamer is left alone (got \(healthyReport.advice.map(\.id)))"
+        )
+        expect(
+            healthyReport.cacheShare > 0.9,
+            "the basis is reported even with no advice (\(Int(healthyReport.cacheShare * 100))% cache)"
+        )
+
+        // Context re-sent rather than reused.
+        let wasteful = (0..<12).map {
+            event(
+                model: "claude-opus-5", session: "s\($0)", key: "w\($0)",
+                input: 900_000, output: 100_000, write: 50_000, read: 100_000
+            )
+        }
+        expect(fired(Coach.report(events: wasteful), "cache-reuse"), "low cache reuse is flagged")
+
+        // Cache written every session and never read back.
+        let churn = (0..<12).map {
+            event(
+                model: "claude-opus-5", session: "s\($0)", key: "c\($0)",
+                input: 30_000, output: 20_000, write: 800_000, read: 400_000
+            )
+        }
+        let churnReport = Coach.report(events: churn)
+        expect(fired(churnReport, "cache-amortisation"), "cache that never pays back is flagged")
+        expect(
+            churnReport.amortisation < Coach.amortisationFloor,
+            "the amortisation figure backs the claim (\(String(format: "%.1f", churnReport.amortisation)))"
+        )
+
+        // Short sessions whose spend went almost entirely on setup.
+        let stubby = (0..<40).map {
+            event(
+                model: "claude-opus-5", session: "s\($0)", key: "t\($0)",
+                input: 2_000, output: 1_000, write: 30_000, read: 40_000
+            )
+        }
+        expect(fired(Coach.report(events: stubby), "session-length"), "short costly sessions are flagged")
+
+        // Small sessions that are simply small — no setup cost being wasted —
+        // must not be flagged. Not every short task is a mistake.
+        let smallButClean = (0..<40).map {
+            event(
+                model: "claude-opus-5", session: "s\($0)", key: "n\($0)",
+                input: 4_000, output: 12_000, write: 0, read: 900_000
+            )
+        }
+        expect(
+            !fired(Coach.report(events: smallButClean), "session-length"),
+            "a short session with no wasted setup is left alone"
+        )
+
+        // Everything on the expensive model while a cheaper one sits idle.
+        var lopsided = (0..<12).map {
+            event(
+                model: "claude-opus-5", session: "s\($0)", key: "m\($0)",
+                input: 40_000, output: 200_000, write: 400_000, read: 20_000_000
+            )
+        }
+        lopsided.append(
+            event(
+                model: "claude-haiku-4-5", session: "s0", key: "mh",
+                input: 500, output: 500, write: 0, read: 5_000
+            )
+        )
+        expect(fired(Coach.report(events: lopsided), "model-mix"), "an idle cheap model is flagged")
+
+        // A tamer who already spreads work across models is not lectured.
+        var balanced = (0..<8).map {
+            event(
+                model: "claude-opus-5", session: "s\($0)", key: "b\($0)",
+                input: 20_000, output: 60_000, write: 200_000, read: 12_000_000
+            )
+        }
+        balanced += (0..<8).map {
+            event(
+                model: "claude-haiku-4-5", session: "sh\($0)", key: "bh\($0)",
+                input: 60_000, output: 200_000, write: 600_000, read: 12_000_000
+            )
+        }
+        expect(
+            !fired(Coach.report(events: balanced), "model-mix"),
+            "a tamer already using cheaper models is left alone"
+        )
+
+        // Forked transcripts repeat the same turn; counting them would inflate
+        // every share the coach reports.
+        let doubled = healthy + healthy
+        let deduped = Coach.report(events: doubled)
+        expect(
+            deduped.billable == healthyReport.billable,
+            "duplicate events do not inflate the report"
+        )
+        expect(
+            deduped.sessions == healthyReport.sessions,
+            "duplicate events do not inflate the session count"
+        )
+
+        // Every claim has to carry a figure, or it cannot be checked.
+        let all = [wasteful, churn, stubby, lopsided].flatMap { Coach.report(events: $0).advice }
+        expect(!all.isEmpty, "the rules produce advice at all (\(all.count) items)")
+        expect(
+            all.allSatisfy { !$0.evidence.isEmpty && !$0.title.isEmpty && !$0.detail.isEmpty },
+            "no advice ships without its evidence"
+        )
+    }
+
     static func testRealLogs() async {
         var found = false
+        var allEvents: [UsageEvent] = []
 
         for provider in [ClaudeCodeProvider() as any UsageProvider, CodexProvider()] {
             // A fresh cache each run, so the timings below measure a real cold
@@ -744,6 +901,7 @@ enum SelfTest {
                 continue
             }
             found = true
+            allEvents.append(contentsOf: events)
 
             let usage = UsageAggregator.summarize(provider: provider.id, events: events)
             print("""
@@ -786,6 +944,46 @@ enum SelfTest {
 
         if !found {
             print("  (no local AI-tool logs found — parser checks above still ran)")
+            return
         }
+
+        // What the coach actually says about this machine. Calibration is only
+        // meaningful against the profile the app really computes here, so the
+        // figures are printed and the claims are checked for consistency with
+        // them rather than against a fixture that can drift away from reality.
+        let report = Coach.report(events: allEvents)
+        print("""
+              Coach: \(report.sessions) sessions, \
+              \(TokenFormatter.short(report.billable)) billable, \
+              \(Int(report.cacheShare * 100))% cache share, \
+              \(String(format: "%.1f", report.amortisation))x amortisation, \
+              median session \(TokenFormatter.short(report.medianSession))
+              """)
+        for item in report.advice {
+            print("    · \(item.title) — \(item.evidence)")
+        }
+        if report.advice.isEmpty, !report.isTooEarly {
+            print("    · nothing to flag")
+        }
+
+        expect(
+            report.billable > 0 && report.sessions > 0,
+            "Coach: the real profile has a basis to reason from"
+        )
+        // Each rule is allowed to fire, but only in agreement with the figure
+        // printed above — a rule that fires against its own evidence is a bug.
+        expect(
+            report.advice.contains { $0.id == "cache-reuse" } == (report.cacheShare < Coach.cacheShareFloor),
+            "Coach: the cache verdict on this machine matches its own measurement"
+        )
+        expect(
+            report.advice.filter { $0.id == "session-length" }.isEmpty
+                || report.medianSession < Coach.shortSessionBar,
+            "Coach: session advice on this machine matches its own measurement"
+        )
+        expect(
+            Set(report.advice.map(\.id)).count == report.advice.count,
+            "Coach: no rule fires twice"
+        )
     }
 }
