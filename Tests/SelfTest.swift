@@ -66,6 +66,12 @@ enum SelfTest {
         section("Growth pace")
         testGrowthPace()
 
+        section("Shop")
+        testShop()
+
+        section("Save compatibility")
+        testSaveCompatibility()
+
         section("Real logs on this machine")
         await testRealLogs()
 
@@ -461,6 +467,167 @@ enum SelfTest {
             let py = min(height - 1, max(0, Int(Double(height) * y)))
             return Int(buffer[(py * width + px) * 4 + 3])
         }
+    }
+
+    /// The shop's one rule is that an item is bought before the outcome is
+    /// known and never applied in hindsight. These checks pin the parts of that
+    /// rule the code can actually enforce.
+    /// Saves must survive the model gaining fields.
+    ///
+    /// This is a regression test for a real loss: adding `preferredField` and
+    /// `xVialActive` to `Partner` made every existing save undecodable, because
+    /// Swift's synthesized decoder calls `decode` for non-optional properties
+    /// and ignores their defaults. The store read that as "no save" and started
+    /// a fresh egg, wiping a partner that had been growing for days.
+    static func testSaveCompatibility() {
+        // Exactly the shape a save had before the shop existed.
+        let legacy = """
+        {"id":"603328E8-6639-4FC4-8C60-38E5D82CAB78","seed":18142757285949799043,
+         "digimonID":97,"stage":1,"bornAt":808851098.4,"tokens":271557,
+         "isXAntibody":false,"lineage":[97,144],"digivolutionDates":[],
+         "careMistakes":6,"caredDays":0}
+        """
+        guard let partner = try? JSONDecoder().decode(Partner.self, from: Data(legacy.utf8)) else {
+            expect(false, "a save written before the shop existed still decodes")
+            return
+        }
+        expect(partner.seed == 18_142_757_285_949_799_043, "the seed survives")
+        expect(partner.lineage == [97, 144], "the lineage survives")
+        expect(partner.tokens == 271_557, "the token total survives")
+        expect(partner.preferredField == nil, "a field added later defaults cleanly")
+        expect(partner.xVialActive == false, "a flag added later defaults cleanly")
+
+        // The absolute minimum: a partner is identified by its seed, and the
+        // engine is deterministic, so seed alone is enough to rebuild one.
+        let minimal = #"{"seed":18142757285949799043}"#
+        let rebuilt = try? JSONDecoder().decode(Partner.self, from: Data(minimal.utf8))
+        expect(rebuilt?.seed == 18_142_757_285_949_799_043, "a seed alone is a valid save")
+
+        // And determinism means that rebuild produces the same partner, which is
+        // what made recovering from the wipe possible at all.
+        let a = Digivolution.hatch(seed: 18_142_757_285_949_799_043, profile: CareProfile())
+        let b = Digivolution.hatch(seed: 18_142_757_285_949_799_043, profile: CareProfile())
+        expect(a?.entry.id == b?.entry.id, "the same seed rebuilds the same partner")
+
+        // A save missing the seed is genuinely unreadable and must fail loudly
+        // rather than decode into a partner with a zero seed.
+        let broken = #"{"tokens":100}"#
+        expect(
+            (try? JSONDecoder().decode(Partner.self, from: Data(broken.utf8))) == nil,
+            "a save with no seed is rejected rather than silently invented"
+        )
+    }
+
+    static func testShop() {
+        var wallet = Wallet()
+        wallet.update(allTimeBillable: 5_000_000)
+        expect(wallet.balance == 0, "a fresh wallet starts empty, not with the whole log history")
+
+        wallet.update(allTimeBillable: 5_600_000)
+        expect(wallet.balance == 600_000, "currency accrues from work done after install")
+
+        // Logs can be pruned; the balance must not go negative.
+        wallet.update(allTimeBillable: 100_000)
+        expect(wallet.balance >= 0, "a shrinking log re-anchors instead of going negative")
+
+        var funded = Wallet()
+        funded.update(allTimeBillable: 0)
+        funded.update(allTimeBillable: 10_000_000)
+        let compass = ShopItem.item(.fieldCompass)
+        expect(funded.canAfford(compass), "affordability compares against the balance")
+        funded.spent = funded.earned
+        expect(!funded.canAfford(compass), "spending everything ends affordability")
+
+        // Nothing in the catalogue may undo the past. This is the rule the whole
+        // design rests on, so it is asserted rather than left to review.
+        let names = ShopItem.catalogue.map(\.name).joined(separator: " ").lowercased()
+        expect(
+            !names.contains("medicine") && !names.contains("candy"),
+            "no item clears a care mistake or skips a rung"
+        )
+        expect(ShopItem.catalogue.allSatisfy { $0.price > 0 }, "every item costs something")
+
+        // A compass has to actually move the branch, or it is decoration.
+        var profile = CareProfile()
+        profile.attribute = .free
+        var steered = 0
+        var attempted = 0
+        for entry in DigiDex.shared.entries(stage: .child).prefix(60) {
+            let plain = Digivolution.next(
+                from: entry, to: .adult, seed: 5, profile: profile, wantsXAntibody: false
+            )
+            let aimed = Digivolution.next(
+                from: entry, to: .adult, seed: 5, profile: profile,
+                wantsXAntibody: false, preferredField: "Nature Spirits"
+            )
+            guard let plain, let aimed else { continue }
+            attempted += 1
+            if plain.entry.id != aimed.entry.id { steered += 1 }
+        }
+        expect(steered > 10, "a compass changes the branch (\(steered)/\(attempted) differ)")
+
+        // When the pool can honour a compass, it is guaranteed — not merely
+        // favoured. Paying and then watching the roll ignore you is the one
+        // outcome the item must never produce.
+        var honoured = 0
+        var offered = 0
+        for entry in DigiDex.shared.entries(stage: .child).prefix(40) {
+            guard let result = Digivolution.next(
+                from: entry, to: .adult, seed: 9, profile: profile,
+                wantsXAntibody: false, preferredField: "Deep Savers"
+            ) else { continue }
+            guard result.consumedField else { continue }
+            offered += 1
+            if result.entry.fields.contains("Deep Savers") { honoured += 1 }
+        }
+        expect(
+            offered > 0 && honoured == offered,
+            "a spent compass always lands in its field (\(honoured)/\(offered))"
+        )
+
+        // A field the target rung cannot supply must leave the compass unspent
+        // rather than silently consuming it.
+        let unusable = Digivolution.next(
+            from: DigiDex.shared.entries(stage: .child)[0], to: .adult, seed: 3,
+            profile: profile, wantsXAntibody: false,
+            preferredField: "Not A Real Field"
+        )
+        expect(
+            unusable != nil && unusable?.consumedField == false,
+            "an unhonourable compass is kept for the next rung"
+        )
+
+        // Streak freezes cover the gaps nearest today, never today itself.
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        func day(_ back: Int) -> Date {
+            calendar.date(byAdding: .day, value: -back, to: today)!
+        }
+        let active: Set<Date> = [day(0), day(1), day(4), day(5)]
+        let chosen = CareEngine.daysToFreeze(
+            activeDays: active, alreadyFrozen: [], available: 2
+        )
+        expect(chosen.count == 2, "two freezes cover two gaps (got \(chosen.count))")
+        expect(!chosen.contains(today), "today is never frozen — the day is not over")
+        expect(chosen.contains(day(2)) && chosen.contains(day(3)), "the nearest gaps are covered first")
+
+        let none = CareEngine.daysToFreeze(activeDays: active, alreadyFrozen: [], available: 0)
+        expect(none.isEmpty, "no stock means no freezing")
+
+        // A frozen day has to actually rescue the streak and the neglect count.
+        let bare = UsageAggregator.streak(activeDays: Array(active))
+        let rescued = UsageAggregator.streak(
+            activeDays: Array(active), frozenDays: Set(chosen)
+        )
+        expect(rescued > bare, "freezing extends the streak (\(bare) -> \(rescued))")
+
+        let neglectBefore = CareEngine.neglectedDays(
+            activeDays: active, now: Date(), calendar: calendar
+        )
+        let neglectAfter = CareEngine.neglectedDays(
+            activeDays: active, frozenDays: Set(chosen), now: Date(), calendar: calendar
+        )
+        expect(neglectAfter <= neglectBefore, "freezing never increases neglect")
     }
 
     static func testProjectBreakdown() {

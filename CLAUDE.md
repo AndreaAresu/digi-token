@@ -54,6 +54,15 @@ entry in `UsageMonitor.init`. **Never** branch on a provider name outside
 - **`ScanCache` retains events for 120 days** and folds older ones into a
   `UsageArchive`. All-time totals, active days and session counts must keep
   spanning the archive. Never go back to storing every event forever.
+- **Persisted models decode field by field, by hand.** Swift's synthesized
+  decoder calls `decode` for every non-optional property and ignores its default
+  value, so adding one field makes every existing save undecodable — and a store
+  that reads that as "no save" destroys a partner someone raised for weeks. This
+  already happened once, to a real partner. `Partner`, `UsageArchive` and
+  `ScanCache.FileState` therefore have hand-written `init(from:)` using
+  `decodeIfPresent`, and `PartnerStore` copies an unreadable save aside before
+  starting over. Any new persisted type must do the same, and
+  `testSaveCompatibility` must keep passing.
 - **No artwork ships in the binary.** `digidex.json` is data only. Images are
   fetched from digi-api.com at runtime and cached per user. The DigiDex grid
   must not fetch artwork for Digimon the tamer has not met — that is both a

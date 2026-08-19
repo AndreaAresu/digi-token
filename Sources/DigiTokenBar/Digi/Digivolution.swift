@@ -12,6 +12,8 @@ enum Digivolution {
         let isXAntibody: Bool
         /// Why this branch was taken, shown to the tamer after the fact.
         let reason: String
+        /// Whether a compass or graded egg was actually spent on this step.
+        var consumedField: Bool = false
     }
 
     /// Hatches a DigiEgg into a Baby I form.
@@ -33,7 +35,8 @@ enum Digivolution {
         to stage: DigiStage,
         seed: UInt64,
         profile: CareProfile,
-        wantsXAntibody: Bool
+        wantsXAntibody: Bool,
+        preferredField: String? = nil
     ) -> Result? {
         let dex = DigiDex.shared
         var reason = "canon line"
@@ -83,18 +86,50 @@ enum Digivolution {
             if !nonX.isEmpty { pool = nonX }
         }
 
-        let scored = pool.map { (entry: $0, weight: score($0, current: current, profile: profile)) }
+        // A compass narrows the pool rather than merely weighting it. You are
+        // buying a direction, not a lottery ticket — paying and then watching the
+        // roll ignore you would be the worst of both designs. It still only
+        // counts when the pool can honour it, so the purchase is never burned on
+        // a rung whose candidates carry no field data at all.
+        let honouredField = preferredField.flatMap { field in
+            pool.contains { $0.fields.contains(field) } ? field : nil
+        }
+        if let honouredField {
+            pool = pool.filter { $0.fields.contains(honouredField) }
+        }
+
+        let scored = pool.map {
+            (entry: $0, weight: score(
+                $0, current: current, profile: profile, preferredField: honouredField
+            ))
+        }
         let picked = weightedPick(scored, using: &rng) ?? pool[0]
 
-        if reason == "canon line", picked.attribute == profile.attribute {
+        if let honouredField, picked.fields.contains(honouredField) {
+            reason = "compass: \(honouredField)"
+        } else if reason == "canon line", picked.attribute == profile.attribute {
             reason = "\(profile.attribute.rawValue) alignment"
         }
-        return Result(entry: picked, isXAntibody: isX || picked.x, reason: reason)
+        return Result(
+            entry: picked,
+            isXAntibody: isX || picked.x,
+            reason: reason,
+            consumedField: honouredField != nil
+        )
     }
 
     /// How well a candidate fits the tamer and the partner's lineage.
-    static func score(_ candidate: DigimonEntry, current: DigimonEntry, profile: CareProfile) -> Double {
+    static func score(
+        _ candidate: DigimonEntry,
+        current: DigimonEntry,
+        profile: CareProfile,
+        preferredField: String? = nil
+    ) -> Double {
         var weight = 1.0
+
+        // A compass pulls as hard as alignment does — it is a deliberate choice
+        // the tamer paid for, not a nudge.
+        if let preferredField, candidate.fields.contains(preferredField) { weight += 3.0 }
 
         // The tamer's habits pull hardest.
         if candidate.attribute == profile.attribute { weight += 3.0 }

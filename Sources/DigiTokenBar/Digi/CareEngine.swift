@@ -18,6 +18,9 @@ struct CareProfile: Sendable, Codable, Hashable {
     var nocturnal: Double = 0
     /// Consecutive active days.
     var streak: Int = 0
+    /// How many of those days were covered by a Streak Freeze. Shown alongside
+    /// the streak so the number never quietly overstates the work done.
+    var frozenDays: Int = 0
     var attribute: DigiAttribute = .free
 
     var isLean: Bool { weight < 40 }
@@ -45,6 +48,7 @@ enum CareEngine {
     static func profile(
         from snapshot: UsageSnapshot,
         events: [UsageEvent],
+        frozenDays: Set<Date> = [],
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> CareProfile {
@@ -55,8 +59,9 @@ enum CareEngine {
         let allTime = snapshot.combinedAllTime
         let activeDays = Set(providers.flatMap(\.activeDays).map { calendar.startOfDay(for: $0) })
         profile.streak = UsageAggregator.streak(
-            activeDays: Array(activeDays), now: now, calendar: calendar
+            activeDays: Array(activeDays), frozenDays: frozenDays, now: now, calendar: calendar
         )
+        profile.frozenDays = frozenDays.count
         profile.effort = providers.reduce(0) { $0 + $1.sessionCount }
 
         // Weight: re-sending context is "overfeeding". A high cache-read share
@@ -73,7 +78,7 @@ enum CareEngine {
         // Care mistakes: windows run into the ground, plus recent idle days.
         let blocks = providers.flatMap(\.recentBlocks)
         profile.careMistakes = overworkedWindows(blocks) + neglectedDays(
-            activeDays: activeDays, now: now, calendar: calendar
+            activeDays: activeDays, frozenDays: frozenDays, now: now, calendar: calendar
         )
 
         // Night work. Tokens, not turns — a 3am marathon should register.
@@ -97,16 +102,50 @@ enum CareEngine {
     /// Only the window matters: a tamer who worked every day this fortnight has
     /// a healthy partner regardless of the months of silence before it.
     static func neglectedDays(
-        activeDays: Set<Date>, now: Date, calendar: Calendar
+        activeDays: Set<Date>, frozenDays: Set<Date> = [], now: Date, calendar: Calendar
     ) -> Int {
         let today = calendar.startOfDay(for: now)
         guard let windowStart = calendar.date(
             byAdding: .day, value: -(neglectWindowDays - 1), to: today
         ) else { return 0 }
 
-        let worked = activeDays.filter { $0 >= windowStart && $0 <= today }.count
+        let covered = activeDays.union(frozenDays)
+        let worked = covered.filter { $0 >= windowStart && $0 <= today }.count
         let idle = neglectWindowDays - worked
         return max(0, idle - neglectGraceDays)
+    }
+
+    /// Picks the idle days a stock of Streak Freezes should cover.
+    ///
+    /// Walks back from today and spends a freeze on the first gaps it meets, so
+    /// the purchase protects the streak the tamer actually has rather than some
+    /// unreachable older one. Today is never frozen — the day is not over.
+    static func daysToFreeze(
+        activeDays: Set<Date>,
+        alreadyFrozen: Set<Date>,
+        available: Int,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> [Date] {
+        guard available > 0 else { return [] }
+        let today = calendar.startOfDay(for: now)
+        let covered = activeDays.union(alreadyFrozen)
+        guard let earliestActive = activeDays.min() else { return [] }
+
+        var chosen: [Date] = []
+        var cursor = calendar.date(byAdding: .day, value: -1, to: today) ?? today
+
+        while chosen.count < available, cursor >= earliestActive {
+            if !covered.contains(cursor) {
+                chosen.append(cursor)
+            }
+            guard let previous = calendar.date(byAdding: .day, value: -1, to: cursor) else { break }
+            cursor = previous
+            // Only defend the recent window; older gaps are history, not a
+            // streak worth rescuing.
+            if today.timeIntervalSince(cursor) > Double(neglectWindowDays) * 86400 { break }
+        }
+        return chosen
     }
 
     /// Windows the tamer ran into the ground.
