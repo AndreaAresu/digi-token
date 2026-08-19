@@ -129,9 +129,19 @@ enum UsageAggregator {
 
     /// Consecutive days ending today or yesterday. Yesterday still counts so a
     /// streak does not die at midnight before the day has been worked.
-    static func streak(activeDays: [Date], now: Date = Date(), calendar: Calendar = .current) -> Int {
+    ///
+    /// `frozenDays` are days a Streak Freeze covered. They count as worked here,
+    /// but the UI always shows how many were frozen — softening a consequence is
+    /// fine, hiding that it was softened is not.
+    static func streak(
+        activeDays: [Date],
+        frozenDays: Set<Date> = [],
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> Int {
         guard !activeDays.isEmpty else { return 0 }
-        let days = Set(activeDays.map { calendar.startOfDay(for: $0) })
+        var days = Set(activeDays.map { calendar.startOfDay(for: $0) })
+        days.formUnion(frozenDays.map { calendar.startOfDay(for: $0) })
         let today = calendar.startOfDay(for: now)
 
         var cursor = today

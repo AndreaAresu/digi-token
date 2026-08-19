@@ -19,6 +19,11 @@ final class PartnerStore {
     private(set) var profile = CareProfile()
     private(set) var seenDigimon: Set<Int> = []
     private(set) var seenXAntibody: Set<Int> = []
+    private(set) var wallet = Wallet()
+    /// Days a Streak Freeze has already covered.
+    private(set) var frozenDays: Set<Date> = []
+    /// An affinity bought for the *next* egg, applied when it hatches.
+    private(set) var nextEggField: String?
     var pendingEvent: DigivolutionEvent?
 
     /// Called after any change the UI should redraw for. AppKit does not observe
@@ -45,12 +50,31 @@ final class PartnerStore {
         var seenXAntibody: [Int]
         var baseline: Int
         var hasBaseline: Bool
-        var profile: CareProfile
+        /// Optional because it is recomputed from usage on every refresh, so a
+        /// save missing it loses nothing — and a required field here would make
+        /// the whole save unreadable the next time `CareProfile` gains a
+        /// property.
+        var profile: CareProfile?
+        var wallet: Wallet?
+        var frozenDays: [Date]?
+        var nextEggField: String?
     }
 
     init(storeURL: URL = PartnerStore.defaultURL) {
         self.storeURL = storeURL
-        if let data = try? Data(contentsOf: storeURL),
+        let data = try? Data(contentsOf: storeURL)
+
+        // A save that exists but cannot be read must never be silently replaced
+        // — that is weeks of someone's partner. Keep a copy before starting over
+        // so the loss is recoverable rather than absolute.
+        if let data, (try? JSONDecoder().decode(SaveFile.self, from: data)) == nil {
+            let backup = storeURL.deletingLastPathComponent().appendingPathComponent(
+                "partner.unreadable-\(Int(Date().timeIntervalSince1970)).json"
+            )
+            try? data.write(to: backup, options: .atomic)
+        }
+
+        if let data,
            let save = try? JSONDecoder().decode(SaveFile.self, from: data) {
             partner = save.partner
             collection = save.collection
@@ -58,7 +82,10 @@ final class PartnerStore {
             seenXAntibody = Set(save.seenXAntibody)
             baseline = save.baseline
             hasBaseline = save.hasBaseline
-            profile = save.profile
+            profile = save.profile ?? CareProfile()
+            wallet = save.wallet ?? Wallet()
+            frozenDays = Set(save.frozenDays ?? [])
+            nextEggField = save.nextEggField
         } else {
             partner = Partner(seed: UInt64.random(in: 1...UInt64.max))
         }
@@ -75,9 +102,22 @@ final class PartnerStore {
 
     /// Feeds the latest usage to the partner and applies any rung it has earned.
     func apply(snapshot: UsageSnapshot, events: [UsageEvent]) {
-        profile = CareEngine.profile(from: snapshot, events: events)
+        let allTimeBillable = snapshot.combinedAllTime.billable
 
-        let allTime = snapshot.combinedAllTime.billable
+        // The wallet counts work done since the app was installed, which is the
+        // same starting line the partner uses. Adopting it rather than anchoring
+        // fresh means an existing tamer does not find an empty balance next to a
+        // partner that has clearly been growing for weeks.
+        if !wallet.hasBaseline, hasBaseline {
+            wallet.baseline = baseline
+            wallet.hasBaseline = true
+        }
+        wallet.update(allTimeBillable: allTimeBillable)
+        spendStreakFreezesIfNeeded(snapshot: snapshot)
+
+        profile = CareEngine.profile(from: snapshot, events: events, frozenDays: frozenDays)
+
+        let allTime = allTimeBillable
         // First run adopts whatever history is already on disk as the starting
         // line, so an existing user does not instantly jump to Ultimate.
         if !hasBaseline {
@@ -96,6 +136,26 @@ final class PartnerStore {
         onChange?()
     }
 
+    /// Consumes held Streak Freezes on idle days, the way Duolingo's do: bought
+    /// ahead of the lapse, spent automatically when it happens, never applied in
+    /// hindsight by the tamer.
+    private func spendStreakFreezesIfNeeded(snapshot: UsageSnapshot) {
+        let stock = wallet.stock(of: .streakFreeze)
+        guard stock > 0 else { return }
+
+        let calendar = Calendar.current
+        let activeDays = Set(
+            snapshot.detected.flatMap(\.activeDays).map { calendar.startOfDay(for: $0) }
+        )
+        let days = CareEngine.daysToFreeze(
+            activeDays: activeDays, alreadyFrozen: frozenDays, available: stock
+        )
+        guard !days.isEmpty else { return }
+
+        frozenDays.formUnion(days)
+        wallet.inventory[.streakFreeze] = stock - days.count
+    }
+
     private func advanceIfEarned() {
         if partner.isEgg {
             guard partner.tokens >= GrowthCurve.eggHatch else { return }
@@ -105,6 +165,13 @@ final class PartnerStore {
             partner.hatchedAt = Date()
             partner.lineage = [result.entry.id]
             partner.digivolutionDates = [Date()]
+            // A Graded DigiTama's affinity rides along with the hatchling; only
+            // a third of Baby I forms carry field data, so it is honoured at the
+            // first digivolution that can rather than at the hatch itself.
+            if let field = nextEggField {
+                partner.preferredField = field
+                nextEggField = nil
+            }
             record(result.entry, isX: false)
             let event = DigivolutionEvent(
                 from: "DigiTama", to: result.entry, stage: .babyI,
@@ -123,16 +190,22 @@ final class PartnerStore {
               let current = partner.entry {
             var rng = SplitMix64(seed: partner.seed &+ UInt64(nextStage.rawValue) &* 7919)
             let roll = Double(rng.next() >> 11) / Double(1 << 53)
-            let wantsX = roll < CareEngine.xAntibodyChance(profile: profile, hasCharm: false)
+            // A vial does not improve the odds, it settles them — it was bought
+            // before this branch was known, which is the whole point.
+            let wantsX = partner.xVialActive
+                || roll < CareEngine.xAntibodyChance(profile: profile, hasCharm: false)
 
             guard let result = Digivolution.next(
                 from: current, to: nextStage, seed: partner.seed,
-                profile: profile, wantsXAntibody: wantsX
+                profile: profile, wantsXAntibody: wantsX,
+                preferredField: partner.preferredField
             ) else { break }
 
             partner.digimonID = result.entry.id
             partner.stage = nextStage
             partner.isXAntibody = partner.isXAntibody || result.isXAntibody
+            partner.xVialActive = false
+            if result.consumedField { partner.preferredField = nil }
             partner.lineage.append(result.entry.id)
             partner.digivolutionDates.append(Date())
             record(result.entry, isX: result.isXAntibody)
@@ -169,6 +242,72 @@ final class PartnerStore {
     }
 
     var canGraduate: Bool { partner.stage == .ultimate && !partner.isEgg }
+
+    // MARK: - Shop
+
+    enum PurchaseResult: Equatable {
+        case bought
+        case tooExpensive
+        case notApplicable(String)
+    }
+
+    /// Buys one item. `field` is required by the compass and the graded egg.
+    @discardableResult
+    func purchase(_ id: ShopItemID, field: String? = nil) -> PurchaseResult {
+        let item = ShopItem.item(id)
+        guard wallet.canAfford(item) else { return .tooExpensive }
+        if item.needsField, field == nil { return .notApplicable("Pick a field first.") }
+
+        switch id {
+        case .streakFreeze:
+            wallet.inventory[.streakFreeze, default: 0] += 1
+
+        case .fieldCompass:
+            guard !partner.isEgg else {
+                return .notApplicable("Your DigiTama has to hatch before it can be pointed anywhere.")
+            }
+            partner.preferredField = field
+
+        case .xVial:
+            guard !partner.isEgg else {
+                return .notApplicable("Wait for the egg to hatch — there is no digivolution to affect yet.")
+            }
+            guard partner.stage.next != nil else {
+                return .notApplicable("\(partner.displayName) is already at the top of the ladder.")
+            }
+            partner.xVialActive = true
+
+        case .gradedEgg:
+            nextEggField = field
+        }
+
+        wallet.spent += item.price
+        save()
+        onChange?()
+        return .bought
+    }
+
+    /// What the shop should say is currently in effect.
+    var activeEffects: [String] {
+        var effects: [String] = []
+        if let field = partner.preferredField {
+            effects.append("Compass pointing at \(field)")
+        }
+        if partner.xVialActive {
+            effects.append("X-Antibody vial primed for the next digivolution")
+        }
+        if let field = nextEggField {
+            effects.append("Next DigiTama graded toward \(field)")
+        }
+        let stock = wallet.stock(of: .streakFreeze)
+        if stock > 0 {
+            effects.append("\(stock) Streak Freeze\(stock == 1 ? "" : "s") in reserve")
+        }
+        if !frozenDays.isEmpty {
+            effects.append("\(frozenDays.count) day\(frozenDays.count == 1 ? "" : "s") frozen so far")
+        }
+        return effects
+    }
 
     /// Re-checks the ladder without a new usage scan. Needed when the growth
     /// pace changes, since the thresholds move under a partner that has not
@@ -214,7 +353,8 @@ final class PartnerStore {
         let file = SaveFile(
             partner: partner, collection: collection,
             seenDigimon: Array(seenDigimon), seenXAntibody: Array(seenXAntibody),
-            baseline: baseline, hasBaseline: hasBaseline, profile: profile
+            baseline: baseline, hasBaseline: hasBaseline, profile: profile,
+            wallet: wallet, frozenDays: Array(frozenDays), nextEggField: nextEggField
         )
         guard let data = try? JSONEncoder().encode(file) else { return }
         try? data.write(to: storeURL, options: .atomic)

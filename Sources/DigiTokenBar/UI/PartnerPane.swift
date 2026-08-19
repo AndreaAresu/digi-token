@@ -146,7 +146,12 @@ final class PartnerPane: NSView {
 
         careTiles[0].set(value: "\(profile.weight)", hint: weightHint(profile))
         careTiles[1].set(value: "\(profile.discipline)", hint: "consistency")
-        careTiles[2].set(value: "\(profile.streak)d", hint: "active days")
+        // A frozen day is always declared. Softening the consequence is fine;
+        // letting the number quietly overstate the work is not.
+        careTiles[2].set(
+            value: "\(profile.streak)d",
+            hint: profile.frozenDays > 0 ? "\(profile.frozenDays) frozen" : "active days"
+        )
         careTiles[3].set(
             value: "\(profile.careMistakes)",
             hint: profile.careMistakes > 4 ? "drifting Virus" : "on track",

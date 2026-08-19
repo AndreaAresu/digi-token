@@ -171,7 +171,36 @@ scanning, the full growth ladder, care-driven branching, the X-Antibody roll,
 the DigiDex, idle animation, the floating pet, notifications, and Jogress in the
 model layer.
 
-Not built yet: a shop, localisation, per-project breakdowns, and a Jogress UI.
+Not built yet: localisation and a Jogress UI.
+
+## The shop
+
+Currency is billable tokens you already spent working, counted from the day you
+installed the app. **Nothing costs real money.** Spending never slows your
+partner — growth reads its own total, so the shop is a budget, not a tax.
+
+One rule governs the catalogue: **an item is bought before the outcome is known,
+never applied in hindsight.** Digivolution is deterministic precisely so that
+relaunching the app cannot reroll a result you disliked; an item that clears a
+care mistake or skips a rung would be that same trick with a price tag. So there
+is no medicine and no rare candy, however traditional both are.
+
+| Item | Price | What it does |
+|---|---|---|
+| Streak Freeze | 150K | Covers one idle day. Bought ahead, spent automatically, always shown as frozen. |
+| Field Compass | 400K | **Guarantees** the next digivolution lands in one Digital World field. |
+| X-Antibody Vial | 1.5M | Settles the X-Antibody roll at the next digivolution. |
+| Graded DigiTama | 800K | Your next egg carries an affinity, honoured at its first digivolution that can. |
+
+The freeze is the interesting case. Duolingo's works because you buy it *before*
+the lapse — it is insurance, not an undo. The honesty is preserved by making it
+visible: your streak reads `12d · 2 frozen`, never a bare 12. Softening a
+consequence is fine; hiding that it was softened is not.
+
+A compass narrows the candidate pool rather than merely weighting it. Buying a
+direction and then watching the roll ignore you would be the worst of both
+designs. It is only spent when the rung can actually honour it — many early
+stages carry no field data, and a purchase should not evaporate on one of them.
 
 ## Attribution and licensing
 

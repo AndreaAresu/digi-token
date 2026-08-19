@@ -14,6 +14,7 @@ final class PopoverController: NSViewController {
 
     private lazy var partnerPane = PartnerPane(store: store)
     private lazy var usagePane = UsagePane(monitor: monitor)
+    private lazy var shopPane = ShopPane(store: store)
     private lazy var dexPane = DexPane(store: store)
     private lazy var scrollers: [NSScrollView] = []
 
@@ -33,8 +34,8 @@ final class PopoverController: NSViewController {
             x: 0, y: 0, width: Theme.popoverWidth, height: Theme.contentHeight + 76
         ))
 
-        tabs.segmentCount = 3
-        for (index, title) in ["Partner", "Usage", "DigiDex"].enumerated() {
+        tabs.segmentCount = 4
+        for (index, title) in ["Partner", "Usage", "Shop", "DigiDex"].enumerated() {
             tabs.setLabel(title, forSegment: index)
         }
         tabs.selectedSegment = 0
@@ -44,8 +45,8 @@ final class PopoverController: NSViewController {
 
         container.translatesAutoresizingMaskIntoConstraints = false
 
-        // Partner and Usage scroll; the DigiDex manages its own scroll view.
-        for pane in [partnerPane, usagePane] {
+        // These scroll; the DigiDex manages its own scroll view.
+        for pane in [partnerPane, usagePane, shopPane] as [NSView] {
             let scroller = NSScrollView()
             scroller.hasVerticalScroller = true
             scroller.drawsBackground = false
@@ -146,6 +147,7 @@ final class PopoverController: NSViewController {
     func refresh() {
         partnerPane.refresh()
         usagePane.refresh()
+        shopPane.refresh()
         dexPane.refresh()
 
         if let last = monitor.lastRefresh {
@@ -170,7 +172,7 @@ final class PopoverController: NSViewController {
         for (position, scroller) in scrollers.enumerated() {
             scroller.isHidden = position != index
         }
-        dexPane.isHidden = index != 2
+        dexPane.isHidden = index != 3
     }
 
     @objc private func switchTab() {
