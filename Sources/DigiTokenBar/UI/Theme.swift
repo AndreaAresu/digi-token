@@ -155,15 +155,63 @@ final class HistogramView: NSView {
 /// Displays a Digimon, loading its artwork the first time it is shown.
 final class SpriteView: NSImageView {
     private var currentID: Int?
+    private var wantsIdleMotion = false
+
+    /// A slow vertical drift, so the partner reads as alive rather than as a
+    /// sticker. Driven by Core Animation on the layer, which costs no timer and
+    /// no redraw on the main thread.
+    var idleMotion: Bool {
+        get { wantsIdleMotion }
+        set {
+            wantsIdleMotion = newValue
+            newValue ? startIdleMotion() : layer?.removeAnimation(forKey: "idle")
+        }
+    }
 
     init(size: CGFloat) {
         super.init(frame: .zero)
         imageScaling = .scaleProportionallyUpOrDown
         translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
         NSLayoutConstraint.activate([
             widthAnchor.constraint(equalToConstant: size),
             heightAnchor.constraint(equalToConstant: size),
         ])
+    }
+
+    private func startIdleMotion() {
+        guard let layer else { return }
+        layer.removeAnimation(forKey: "idle")
+
+        let bob = CABasicAnimation(keyPath: "transform.translation.y")
+        bob.fromValue = -2.0
+        bob.toValue = 2.0
+        bob.duration = 1.6
+        bob.autoreverses = true
+        bob.repeatCount = .infinity
+        bob.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+
+        // A touch of squash on the way down sells the weight of the thing.
+        let squash = CABasicAnimation(keyPath: "transform.scale.y")
+        squash.fromValue = 1.0
+        squash.toValue = 0.97
+        squash.duration = 1.6
+        squash.autoreverses = true
+        squash.repeatCount = .infinity
+        squash.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+
+        let group = CAAnimationGroup()
+        group.animations = [bob, squash]
+        group.duration = 3.2
+        group.repeatCount = .infinity
+        layer.add(group, forKey: "idle")
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // Core Animation drops animations when a view leaves the window, which
+        // happens every time the popover closes.
+        if wantsIdleMotion, window != nil { startIdleMotion() }
     }
 
     @available(*, unavailable)

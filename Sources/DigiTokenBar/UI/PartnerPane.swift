@@ -114,6 +114,7 @@ final class PartnerPane: NSView {
         let profile = store.profile
 
         sprite.show(partner.entry)
+        sprite.idleMotion = Settings.shared.animateSprite && !partner.isEgg
         nameLabel.stringValue = partner.displayName
         xBadge.isHidden = !partner.isXAntibody
 

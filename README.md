@@ -132,14 +132,38 @@ project compiles from a bare Command Line Tools install, with `swiftc` and no
 package manager — which is a better story for contributors than a 10 GB
 prerequisite.
 
+## Living with it
+
+- **Idle animation.** The partner drifts and breathes, in the menu bar and in the
+  popover. Core Animation drives the panel and the pet; the menu bar redraws four
+  times a second at whole-pixel offsets.
+- **Floating desktop pet.** A borderless, non-activating panel that follows you
+  across Spaces. Drag it anywhere, right-click for size (64–192 px) or to hide.
+  Clicking it never steals focus from what you were typing.
+- **Notifications** when your DigiTama hatches and on every digivolution — the
+  payoff usually happens while the popover is closed.
+- **Launch at login**, refresh interval, and every toggle above live under the
+  gear in the popover footer.
+
+### Artwork clean-up
+
+digi-api paints almost every Digimon on a solid white card, which reads as a
+white rectangle on a dark panel. Each image is keyed and trimmed once, on
+download, then cached.
+
+The key is a **flood fill from the borders**, not a brightness threshold: only
+white that is connected to the edge is removed. A threshold would punch holes
+through Angemon's wings and Zurumon's eye highlights, which is exactly the case
+`scripts/test.sh` pins.
+
 ## Status
 
-Early. Working today: both providers, incremental scanning, the full growth
-ladder, care-driven branching, the X-Antibody roll, the DigiDex, and Jogress in
-the model layer.
+Early, but the loop is complete. Working today: both providers, incremental
+scanning, the full growth ladder, care-driven branching, the X-Antibody roll,
+the DigiDex, idle animation, the floating pet, notifications, and Jogress in the
+model layer.
 
-Not built yet: a floating desktop pet, notifications, a shop, localisation,
-per-project breakdowns, and a Jogress UI.
+Not built yet: a shop, localisation, per-project breakdowns, and a Jogress UI.
 
 ## Credits and disclaimer
 
