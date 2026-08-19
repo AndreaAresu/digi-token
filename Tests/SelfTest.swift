@@ -895,6 +895,26 @@ enum SelfTest {
             "a tamer already using cheaper models is left alone"
         )
 
+        // Two tools, two habits. The coach is scoped to one tool at a time
+        // because a report over the union describes neither: here the cache
+        // reads from the tool that is used well swamp the one that is not, and
+        // the advice that should fire disappears. It was appearing under the
+        // wrong tab before, which is the same bug seen from the other side.
+        let secondTool = (0..<12).map {
+            event(
+                model: "claude-opus-5", session: "x\($0)", key: "x\($0)",
+                input: 900_000, output: 100_000, write: 50_000, read: 100_000
+            )
+        }
+        expect(
+            fired(Coach.report(events: secondTool), "cache-reuse"),
+            "a tool used wastefully is flagged on its own events"
+        )
+        expect(
+            !fired(Coach.report(events: healthy + secondTool), "cache-reuse"),
+            "pooling both tools hides it — which is why the pane reports per tool"
+        )
+
         // Forked transcripts repeat the same turn; counting them would inflate
         // every share the coach reports.
         let doubled = healthy + healthy

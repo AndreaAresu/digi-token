@@ -84,9 +84,14 @@ enum UI {
 
     /// A small all-caps section heading.
     static func caption(_ text: String) -> NSTextField {
-        let field = label(
-            text.uppercased(), size: 9, weight: .heavy, color: .tertiaryLabelColor
-        )
+        let field = label("", size: 9, weight: .heavy, color: .tertiaryLabelColor)
+        setCaption(field, text)
+        return field
+    }
+
+    /// Retitles a caption. The letterspacing lives in the attributed string, so
+    /// assigning `stringValue` directly would quietly drop it.
+    static func setCaption(_ field: NSTextField, _ text: String) {
         field.attributedStringValue = NSAttributedString(
             string: text.uppercased(),
             attributes: [
@@ -95,7 +100,6 @@ enum UI {
                 .kern: 1.3,
             ]
         )
-        return field
     }
 
     static func stack(

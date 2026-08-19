@@ -160,10 +160,14 @@ final class UsagePane: NSView {
         histogram.activeIndex = recent.last?.isActive == true ? recent.count - 1 : nil
 
         rebuildProjects(usage)
-        // Deliberately the whole event stream rather than the selected tool's:
-        // the coach describes how the tamer works, which does not change when
-        // they switch agent halfway through an afternoon.
-        coach.show(Coach.report(events: monitor.events))
+        // The selected tool's events, not the whole stream. Cache behaviour,
+        // session length and which models are in the mix are all set per tool,
+        // so advice read off Claude Code's logs meant nothing under the Codex
+        // tab — it just looked as though it did.
+        coach.show(
+            Coach.report(events: monitor.events(for: usage.provider)),
+            scope: usage.provider.displayName
+        )
     }
 
     private func rebuildProjects(_ usage: ProviderUsage) {

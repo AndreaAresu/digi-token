@@ -45,14 +45,17 @@ final class AdviceRow: NSView {
 
 /// The coach section of the Usage pane.
 ///
-/// Combined across tools on purpose: the question it answers is how the tamer
-/// works, and that does not change when they switch agent halfway through an
-/// afternoon.
+/// Scoped to whichever tool the pane is showing, and says so in its heading.
+/// The rules are about cache reuse, session length and model mix, and all three
+/// are set per tool: how Codex is configured says nothing about what Claude
+/// Code is costing. Advice measured on one tool's logs and displayed under the
+/// other's name is just wrong, however true it is of the tamer overall.
 @MainActor
 final class CoachSection: NSView {
     private let rows = UI.stack(.vertical, spacing: 8, [])
     private let summary = UI.label("", size: 10, color: .secondaryLabelColor, mono: true)
     private let verdict = UI.label("", size: 11, weight: .semibold)
+    private let heading = UI.caption("Coach")
 
     init() {
         super.init(frame: .zero)
@@ -61,9 +64,7 @@ final class CoachSection: NSView {
         UI.wraps(summary, lines: 2, width: AdviceRow.textWidth)
 
         let head = UI.stack(.vertical, spacing: 3, [verdict, summary])
-        let stack = UI.stack(.vertical, spacing: 8, [
-            UI.caption("Coach · all tools"), head, rows,
-        ])
+        let stack = UI.stack(.vertical, spacing: 8, [heading, head, rows])
         addSubview(stack)
 
         NSLayoutConstraint.activate([
@@ -79,7 +80,11 @@ final class CoachSection: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    func show(_ report: CoachReport) {
+    /// `scope` names the tool the report was measured on, and is shown rather
+    /// than implied: a tamer who uses both has two different profiles, and the
+    /// advice is only checkable if it says which one it is talking about.
+    func show(_ report: CoachReport, scope: String) {
+        UI.setCaption(heading, "Coach · \(scope)")
         rows.arrangedSubviews.forEach {
             rows.removeArrangedSubview($0)
             $0.removeFromSuperview()
@@ -89,7 +94,7 @@ final class CoachSection: NSView {
             verdict.stringValue = "Not enough history yet"
             verdict.textColor = .secondaryLabelColor
             summary.stringValue =
-                "\(report.sessions) session\(report.sessions == 1 ? "" : "s") so far — "
+                "\(report.sessions) session\(report.sessions == 1 ? "" : "s") on \(scope) so far — "
                 + "the coach waits for \(Coach.minSessions) before it claims anything."
             return
         }

@@ -4,7 +4,12 @@ import Foundation
 @MainActor
 final class UsageMonitor {
     private(set) var snapshot = UsageSnapshot()
+    /// Every event from every tool, which is what the partner grows on.
     private(set) var events: [UsageEvent] = []
+    /// The same events kept per tool, so a view can describe one of them
+    /// without having to ask where an event came from — nothing outside
+    /// `Core/Providers` is allowed to know that.
+    private(set) var eventsByProvider: [ProviderID: [UsageEvent]] = [:]
     private(set) var isRefreshing = false
     private(set) var lastRefresh: Date?
     private(set) var lastError: String?
@@ -41,6 +46,12 @@ final class UsageMonitor {
         supportDirectory.appendingPathComponent("scan-\(provider.rawValue).json")
     }
 
+    /// One tool's events. Empty for a tool that is not installed, which is the
+    /// same thing the caller would do with it anyway.
+    func events(for provider: ProviderID) -> [UsageEvent] {
+        eventsByProvider[provider] ?? []
+    }
+
     func attach(partnerStore: PartnerStore) {
         self.partnerStore = partnerStore
     }
@@ -68,9 +79,9 @@ final class UsageMonitor {
 
         // Log trees get large; scanning them on the main actor would stutter the
         // popover animation every refresh.
-        let result: (UsageSnapshot, [UsageEvent]) = await Task.detached(priority: .utility) {
+        let result: (UsageSnapshot, [ProviderID: [UsageEvent]]) = await Task.detached(priority: .utility) {
             var snapshot = UsageSnapshot()
-            var all: [UsageEvent] = []
+            var byProvider: [ProviderID: [UsageEvent]] = [:]
 
             for provider in providers where provider.isAvailable() {
                 guard let cache = caches[provider.id] else { continue }
@@ -81,14 +92,15 @@ final class UsageMonitor {
                 snapshot.providers[provider.id] = UsageAggregator.summarize(
                     provider: provider.id, events: events, archive: archive
                 )
-                all.append(contentsOf: events)
+                byProvider[provider.id] = events
                 cache.persist()
             }
-            return (snapshot, all)
+            return (snapshot, byProvider)
         }.value
 
         snapshot = result.0
-        events = result.1
+        eventsByProvider = result.1
+        events = ProviderID.allCases.flatMap { result.1[$0] ?? [] }
         lastRefresh = Date()
         lastError = snapshot.providers.isEmpty
             ? "No supported AI coding tool found on this machine."
