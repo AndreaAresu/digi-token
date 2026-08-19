@@ -1,0 +1,5 @@
+build/
+.build/
+tools/.cache/
+.DS_Store
+*.xcuserdatad
