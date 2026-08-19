@@ -47,6 +47,10 @@ final class ShopPane: NSView {
             root.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
             root.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             root.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+            // Pinned to the bottom so the pane reports its real height; without
+            // it the enclosing scroll view finds nothing to scroll and anything
+            // past the visible 392 points cannot be reached.
+            root.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -14),
             walletCard.widthAnchor.constraint(equalTo: root.widthAnchor),
             wallet.widthAnchor.constraint(equalTo: walletCard.widthAnchor, constant: -16),
             effectsLabel.widthAnchor.constraint(equalTo: root.widthAnchor),
