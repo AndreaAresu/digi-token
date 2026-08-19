@@ -16,6 +16,17 @@ enum Theme {
         }
     }
 
+    /// Rarity is read off the evolution graph, so its colours run cool-to-warm
+    /// with how few lines reach a form rather than being a made-up tier ladder.
+    static func rarity(_ rarity: DigiRarity) -> NSColor {
+        switch rarity {
+        case .common: NSColor.secondaryLabelColor
+        case .uncommon: NSColor(calibratedRed: 0.42, green: 0.80, blue: 0.45, alpha: 1)
+        case .rare: NSColor(calibratedRed: 0.36, green: 0.72, blue: 0.98, alpha: 1)
+        case .unreachable: accent
+        }
+    }
+
     static let popoverWidth: CGFloat = 340
     static let contentHeight: CGFloat = 392
 }
@@ -216,6 +227,26 @@ final class SpriteView: NSImageView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    /// A form the tamer has not met but could reach from one they have: the
+    /// real shape, flattened so it teases without revealing.
+    func showSilhouette(_ entry: DigimonEntry) {
+        alphaValue = 1
+        contentFilters = []
+        guard currentID != entry.id else { return }
+        currentID = entry.id
+        image = NSImage(systemSymbolName: "questionmark.square.dashed", accessibilityDescription: nil)
+        contentTintColor = .quaternaryLabelColor
+
+        Task { [weak self] in
+            let loaded = await SpriteLoader.shared.silhouette(for: entry)
+            await MainActor.run {
+                guard let self, self.currentID == entry.id, let loaded else { return }
+                self.contentTintColor = nil
+                self.image = loaded
+            }
+        }
+    }
 
     /// Placeholder for a Digimon the tamer has not met, drawn without fetching
     /// the real artwork.

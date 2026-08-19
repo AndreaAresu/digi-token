@@ -78,6 +78,9 @@ enum SelfTest {
         section("Tamer cards")
         await testTamerCards()
 
+        section("Dex detail")
+        testDexDetail()
+
         section("Real logs on this machine")
         await testRealLogs()
 
@@ -362,8 +365,13 @@ enum SelfTest {
         let path = "/tmp/does-not-exist-\(UUID()).jsonl"
         let cache = ScanCache(url: url, calendar: calendar)
 
-        let old = Date().addingTimeInterval(-Double(ScanCache.retentionDays + 30) * 86400)
-        let recent = Date().addingTimeInterval(-3600)
+        let now = Date()
+        let old = now.addingTimeInterval(-Double(ScanCache.retentionDays + 30) * 86400)
+        // Clamped to today rather than simply an hour back: run this in the
+        // first hour after midnight and "an hour ago" lands yesterday, and the
+        // check below that today counts it fails for a reason that has nothing
+        // to do with retention.
+        let recent = max(calendar.startOfDay(for: now), now.addingTimeInterval(-3600))
         let events = [
             UsageEvent(
                 timestamp: old, model: "m",
@@ -1067,6 +1075,123 @@ enum SelfTest {
             .replacingOccurrences(of: "_", with: "/")
         while s.count % 4 != 0 { s += "=" }
         return Data(base64Encoded: s)
+    }
+
+    /// Rarity is a description of the evolution graph, not a balance knob, so
+    /// what is pinned here is that it keeps describing the graph.
+    static func testDexDetail() {
+        let dex = DigiDex.shared
+
+        // The reverse index rebuilt at load has to match a direct count over
+        // `next`, because the `prior` edges it replaces were dropped from the
+        // shipped file.
+        var expected: [Int: Int] = [:]
+        for entry in dex.all {
+            for target in entry.next { expected[target, default: 0] += 1 }
+        }
+        let mismatches = dex.all.filter { dex.routesInto($0.id) != (expected[$0.id] ?? 0) }
+        expect(mismatches.isEmpty, "the reverse index matches the forward edges")
+
+        expect(DigiRarity(routes: 0) == .unreachable, "no route in reads as unreachable")
+        expect(DigiRarity(routes: 1) == .rare, "a single route reads as rare")
+        expect(DigiRarity(routes: 2) == .rare, "two routes still read as rare")
+        expect(DigiRarity(routes: 3) == .uncommon, "three routes read as uncommon")
+        expect(DigiRarity(routes: 7) == .common, "the median form reads as common")
+
+        // The tiers have to actually split the roster; a scheme that files
+        // everything under one label describes nothing.
+        var buckets: [String: Int] = [:]
+        for entry in dex.all {
+            buckets[dex.rarity(of: entry).label, default: 0] += 1
+        }
+        expect(buckets.count == 4, "every tier is populated (\(buckets))")
+        let biggest = buckets.values.max() ?? 0
+        expect(
+            biggest < dex.all.count * 3 / 4,
+            "no single tier swallows the roster (largest \(biggest)/\(dex.all.count))"
+        )
+
+        // A form with no route in must really have none, or the label lies.
+        if let orphan = dex.all.first(where: { dex.rarity(of: $0) == .unreachable }) {
+            expect(
+                !dex.all.contains { $0.next.contains(orphan.id) },
+                "\(orphan.name) is labelled unreachable and nothing digivolves into it"
+            )
+        }
+
+        // MARK: The reference-book payload
+
+        let payload = """
+        {"id":1,"releaseDate":"1997",
+         "descriptions":[
+           {"language":"jap","description":"日本語"},
+           {"language":"en_us","description":"A Reptile Digimon."}],
+         "skills":[
+           {"skill":"Baby Flame","translation":"Pepper Breath"},
+           {"skill":"Sharp Claws","translation":""},
+           {"skill":"","translation":"ignored"}]}
+        """
+        guard let detail = DetailLoader.parse(Data(payload.utf8), id: 1) else {
+            expect(false, "a digi-api payload parses")
+            return
+        }
+        expect(detail.summary == "A Reptile Digimon.", "the English entry is the one taken")
+        expect(detail.year == "1997", "the release year is kept")
+        expect(detail.skills.count == 2, "a nameless skill is dropped (\(detail.skills.count))")
+        expect(
+            detail.skills.first?.translation == "Pepper Breath",
+            "a skill keeps its English gloss"
+        )
+        expect(
+            detail.skills.last?.translation == nil,
+            "an empty gloss becomes no gloss rather than an empty line"
+        )
+
+        // Some entries carry the year as a number instead of a string.
+        let numeric = #"{"id":2,"releaseDate":1999,"descriptions":[],"skills":[]}"#
+        expect(
+            DetailLoader.parse(Data(numeric.utf8), id: 2)?.year == "1999",
+            "a numeric release year is read too"
+        )
+
+        // Nothing worth showing must not be cached as an empty card.
+        let barren = #"{"id":3,"descriptions":[],"skills":[]}"#
+        expect(
+            DetailLoader.parse(Data(barren.utf8), id: 3) == nil,
+            "an entry with nothing in it is not cached as a blank card"
+        )
+        expect(
+            DetailLoader.parse(Data("not json".utf8), id: 4) == nil,
+            "a malformed payload is refused"
+        )
+
+        // A card written by an older build must still decode, like every other
+        // persisted type here.
+        let legacy = #"{"id":9}"#
+        let old = try? JSONDecoder().decode(DigimonDetail.self, from: Data(legacy.utf8))
+        expect(old?.id == 9, "a detail cached before the newer fields still decodes")
+        expect(old?.skills.isEmpty == true, "a missing skill list defaults cleanly")
+
+        // The silhouette has to keep the cut-out's shape, or it is a grey box.
+        let source = NSImage(size: NSSize(width: 40, height: 40))
+        source.lockFocus()
+        NSColor.red.setFill()
+        NSBezierPath(ovalIn: NSRect(x: 8, y: 8, width: 24, height: 24)).fill()
+        source.unlockFocus()
+        let flat = SpriteLoader.flatten(source)
+        expect(flat.size == source.size, "flattening does not resize the sprite")
+        if let a = SelfTest.PixelSampler(source), let b = SelfTest.PixelSampler(flat) {
+            expect(
+                a.alpha(atFraction: 0.05, 0.05) < 16 && b.alpha(atFraction: 0.05, 0.05) < 16,
+                "the transparent corner stays transparent"
+            )
+            expect(
+                a.alpha(atFraction: 0.5, 0.5) > 200 && b.alpha(atFraction: 0.5, 0.5) > 200,
+                "the filled centre stays filled"
+            )
+        } else {
+            expect(false, "the flattened sprite is readable")
+        }
     }
 
     static func testRealLogs() async {

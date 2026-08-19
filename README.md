@@ -254,6 +254,46 @@ Fusing spends one of your own retired partners and leaves the visitor untouched
 their machine. The outcome is seeded from both partners, so re-importing a card
 is not a way to reroll a form you did not like.
 
+## The DigiDex
+
+Three states, and the difference between them is deliberate:
+
+- **Met** — full artwork, and clicking opens a card.
+- **One step away** — a flattened silhouette. These are the only unmet forms
+  whose artwork is fetched.
+- **Everything else** — a dashed mark whose image is never requested.
+
+Silhouetting the whole roster would mean pulling 1,259 images from digi-api the
+first time the tab is opened (34 MB cached, and 1,259 requests to a free API).
+A form you could reach next is a tease; the other thousand are a spoiler. Names
+stay visible in every state, so search still works across the roster.
+
+The card shows what the shipped index already knows — stage, attribute, type,
+field, X-Antibody, and where the form digivolves to — plus a **rarity** read off
+the evolution graph rather than invented:
+
+| Label | Routes in | Share of roster |
+|---|---|---|
+| Off the graph | 0 | 116 |
+| Rare | 1–2 | 202 |
+| Uncommon | 3–6 | 279 |
+| Common | 7+ | 662 |
+
+The exact route count is always printed beside the label, so the claim can be
+checked. "Off the graph" means no recorded line digivolves into that form at all
+— you meet it through a fallback branch or a Jogress.
+
+The reference-book text, attacks and release year are fetched from digi-api the
+first time a card is opened and cached from then on. They are **not** in
+`digidex.bin`: the descriptions alone are 442 KB of prose, which would add 165 KB
+compressed to an app that is 756 KB in total. Artwork already works this way, so
+the text follows it — you pay for the forms you actually look at.
+
+Sprites are cached as HEIC. Measured across 86 real sprites that averages 28 KB
+against 79 KB for the equivalent PNG, so a full roster projects to 34 MB rather
+than 94 MB. Alpha survives exactly, which matters: these are cut-outs, and a
+format that flattened them would paint the white card back on.
+
 ## Attribution and licensing
 
 This project is licensed in two parts, because the code and the Digimon data do

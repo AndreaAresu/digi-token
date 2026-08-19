@@ -22,6 +22,15 @@ final class PopoverController: NSViewController {
     /// Index of the DigiDex tab, which is the one pane that scrolls itself.
     private static let dexTab = 3
 
+    /// The banner announces a digivolution above the panes rather than on top of
+    /// them. It used to be an overlay pinned to the container's top edge, which
+    /// meant it covered whatever was underneath — the partner's head on the
+    /// Partner tab, the artwork on a DigiDex card. These two constraints let it
+    /// take its space from the content area instead, so the popover keeps its
+    /// size and nothing is ever hidden behind it.
+    private var bannerHeight: NSLayoutConstraint!
+    private var containerTop: NSLayoutConstraint!
+
     init(store: PartnerStore, monitor: UsageMonitor) {
         self.store = store
         self.monitor = monitor
@@ -118,15 +127,26 @@ final class PopoverController: NSViewController {
             root.addSubview(view)
         }
 
+        // Zero while there is nothing to announce, so the layout below is
+        // identical to having no banner at all.
+        bannerHeight = banner.heightAnchor.constraint(equalToConstant: 0)
+        bannerHeight.isActive = true
+        containerTop = container.topAnchor.constraint(equalTo: banner.bottomAnchor)
+
         NSLayoutConstraint.activate([
+            root.heightAnchor.constraint(equalToConstant: Theme.contentHeight + 76),
+
             tabs.topAnchor.constraint(equalTo: root.topAnchor, constant: 10),
             tabs.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 10),
             tabs.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -10),
 
-            container.topAnchor.constraint(equalTo: tabs.bottomAnchor, constant: 8),
+            banner.topAnchor.constraint(equalTo: tabs.bottomAnchor, constant: 8),
+            banner.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            banner.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+
+            containerTop,
             container.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             container.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            container.heightAnchor.constraint(equalToConstant: Theme.contentHeight),
 
             divider.topAnchor.constraint(equalTo: container.bottomAnchor),
             divider.leadingAnchor.constraint(equalTo: root.leadingAnchor),
@@ -136,10 +156,6 @@ final class PopoverController: NSViewController {
             footer.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
             footer.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
             footer.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -9),
-
-            banner.topAnchor.constraint(equalTo: container.topAnchor),
-            banner.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            banner.trailingAnchor.constraint(equalTo: root.trailingAnchor),
         ])
 
         view = root
@@ -148,6 +164,12 @@ final class PopoverController: NSViewController {
 
     /// Called whenever the popover opens or the underlying data moves.
     func refresh() {
+        // `togglePopover` refreshes before it shows, so on the very first click
+        // this runs before AppKit has called `loadView` and the constraints set
+        // up there do not exist yet. Loading on demand keeps one code path
+        // instead of leaving the banner state to be fixed up later.
+        loadViewIfNeeded()
+
         partnerPane.refresh()
         usagePane.refresh()
         shopPane.refresh()
@@ -165,11 +187,25 @@ final class PopoverController: NSViewController {
         if let event = store.pendingEvent {
             banner.present(event) { [weak self] in
                 self?.store.pendingEvent = nil
-                self?.banner.isHidden = true
+                self?.setBannerVisible(false)
             }
+            setBannerVisible(true)
         } else {
-            banner.isHidden = true
+            setBannerVisible(false)
         }
+    }
+
+    /// Shows or hides the banner by giving it space rather than by floating it
+    /// over the panes. The popover's overall height never changes; the content
+    /// area gives up the room instead.
+    private func setBannerVisible(_ visible: Bool) {
+        banner.isHidden = !visible
+        // Defensive: these are built in `loadView`, and a caller that arrives
+        // before it should get a no-op rather than a crash.
+        guard isViewLoaded, bannerHeight != nil, containerTop != nil else { return }
+        bannerHeight.isActive = !visible
+        containerTop.constant = visible ? 8 : 0
+        view.layoutSubtreeIfNeeded()
     }
 
     private func showPane(_ index: Int) {
