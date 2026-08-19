@@ -52,13 +52,20 @@ final class UsagePane: NSView {
             UI.caption("Recent 5-hour windows"), histogram,
         ])
 
+        projectStack = UI.stack(.vertical, spacing: 5, [])
+        let projectsSection = UI.stack(.vertical, spacing: 6, [
+            UI.caption("Where your tokens went"), projectStack,
+        ])
+        self.projectsSection = projectsSection
+
         emptyLabel.maximumNumberOfLines = 3
         emptyLabel.lineBreakMode = .byWordWrapping
         privacyNote.maximumNumberOfLines = 3
         privacyNote.lineBreakMode = .byWordWrapping
 
         contentStack = UI.stack(.vertical, spacing: 12, [
-            picker, row1, row2, blockCard, historyStack, emptyLabel, privacyNote,
+            picker, row1, row2, blockCard, historyStack, projectsSection,
+            emptyLabel, privacyNote,
         ])
         addSubview(contentStack)
 
@@ -73,6 +80,8 @@ final class UsagePane: NSView {
             historyStack.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
             blockBar.widthAnchor.constraint(equalTo: blockInner.widthAnchor),
             histogram.widthAnchor.constraint(equalTo: historyStack.widthAnchor),
+            projectsSection.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
+            projectStack.widthAnchor.constraint(equalTo: projectsSection.widthAnchor),
             emptyLabel.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
             privacyNote.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
         ])
@@ -82,6 +91,12 @@ final class UsagePane: NSView {
 
     private var blockCard: NSView!
     private var historyStack: NSView!
+    private var projectStack: NSStackView!
+    private var projectsSection: NSView!
+
+    /// Long tails are noise in a 340-point popover; everything past this is
+    /// folded into one "other" row so the total still adds up.
+    private let projectLimit = 6
 
     func refresh() {
         let providers = monitor.snapshot.detected
@@ -139,6 +154,38 @@ final class UsagePane: NSView {
         let recent = usage.recentBlocks.suffix(14)
         histogram.values = recent.map(\.counts.billable)
         histogram.activeIndex = recent.last?.isActive == true ? recent.count - 1 : nil
+
+        rebuildProjects(usage)
+    }
+
+    private func rebuildProjects(_ usage: ProviderUsage) {
+        projectStack.arrangedSubviews.forEach {
+            projectStack.removeArrangedSubview($0)
+            $0.removeFromSuperview()
+        }
+
+        let projects = usage.projects.filter { $0.counts.billable > 0 }
+        projectsSection.isHidden = projects.isEmpty
+        guard !projects.isEmpty else { return }
+
+        let peak = projects.first?.counts.billable ?? 1
+        let shown = projects.prefix(projectLimit)
+
+        for project in shown {
+            let row = ProjectRow(project: project, peak: peak)
+            projectStack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: projectStack.widthAnchor).isActive = true
+        }
+
+        let remainder = projects.dropFirst(projectLimit)
+        if !remainder.isEmpty {
+            let total = remainder.reduce(0) { $0 + $1.counts.billable }
+            let label = UI.label(
+                "+\(remainder.count) more · \(TokenFormatter.short(total))",
+                size: 9, color: .tertiaryLabelColor
+            )
+            projectStack.addArrangedSubview(label)
+        }
     }
 
     @objc private func pickProvider() {
@@ -147,4 +194,50 @@ final class UsagePane: NSView {
         selected = providers[picker.selectedSegment].provider
         refresh()
     }
+}
+
+/// One project in the breakdown: name, share bar, and total.
+@MainActor
+final class ProjectRow: NSView {
+    init(project: ProjectUsage, peak: Int) {
+        super.init(frame: .zero)
+
+        let name = UI.label(project.name, size: 10, weight: .medium)
+        name.lineBreakMode = .byTruncatingMiddle
+        let total = UI.label(
+            TokenFormatter.short(project.counts.billable),
+            size: 10, color: .secondaryLabelColor, mono: true
+        )
+        total.setContentHuggingPriority(.required, for: .horizontal)
+
+        let bar = BarView()
+        bar.value = peak > 0 ? Double(project.counts.billable) / Double(peak) : 0
+        // Anything worked on today is called out; the rest are the muted history
+        // behind it.
+        bar.tint = project.today.billable > 0
+            ? Theme.accent
+            : Theme.accent.withAlphaComponent(0.4)
+
+        let header = UI.stack(.horizontal, spacing: 6, [name, UI.spacer(), total])
+        let stack = UI.stack(.vertical, spacing: 2, [header, bar])
+        addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            header.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            bar.widthAnchor.constraint(equalTo: stack.widthAnchor),
+        ])
+
+        var tip = "\(project.name) · \(TokenFormatter.grouped(project.counts.billable)) billable tokens"
+        if project.today.billable > 0 {
+            tip += "\n\(TokenFormatter.short(project.today.billable)) today"
+        }
+        toolTip = tip
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
 }

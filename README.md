@@ -84,13 +84,18 @@ are excluded, so the app never rewards you for wasting money.
 |---|---|---|
 | DigiTama | egg | hatches at 20K |
 | Baby I | Fresh | 0 |
-| Baby II | In-Training | 120K |
-| Child | Rookie | 600K |
-| Adult | Champion | 3M |
-| Perfect | Ultimate | 12M |
-| Ultimate | Mega | 40M |
+| Baby II | In-Training | 75K |
+| Child | Rookie | 300K |
+| Adult | Champion | 1M |
+| Perfect | Ultimate | 3M |
+| Ultimate | Mega | 8M |
 
-Roughly: a first digivolution on day one, Mega in about two months of daily use.
+Token spend varies by an order of magnitude between plans, so the curve has a
+**growth pace** under the gear: *Light use* halves every threshold, *Heavy use*
+triples them. The table above is the default.
+
+Reaching Mega is meant to be the *start* of the game, not the end of it — the
+collection and Jogress are the long haul.
 
 At Mega you can **graduate** your partner into the DigiDex and start a fresh
 egg. Two graduated partners can be fused with **Jogress** into a form neither
@@ -142,8 +147,11 @@ prerequisite.
   Clicking it never steals focus from what you were typing.
 - **Notifications** when your DigiTama hatches and on every digivolution — the
   payoff usually happens while the popover is closed.
-- **Launch at login**, refresh interval, and every toggle above live under the
-  gear in the popover footer.
+- **Where your tokens went.** Agents record the directory they were working in,
+  so the Usage tab breaks spend down by project. Anything touched today is
+  highlighted; the rest is muted history.
+- **Launch at login**, growth pace, refresh interval, and every toggle above live
+  under the gear in the popover footer.
 
 ### Artwork clean-up
 
@@ -165,17 +173,38 @@ model layer.
 
 Not built yet: a shop, localisation, per-project breakdowns, and a Jogress UI.
 
-## Credits and disclaimer
+## Attribution and licensing
 
-Digimon data and artwork come from [digi-api.com](https://digi-api.com).
+This project is licensed in two parts, because the code and the Digimon data do
+not come from the same place.
 
-Digimon is a trademark of Bandai. This is an unofficial, non-commercial fan
-project with no affiliation with or endorsement by Bandai, Toei Animation, or
-any rights holder. No Digimon artwork is redistributed — images are fetched from
-digi-api.com at runtime and cached locally on your own machine.
+**Code** — everything under `Sources/`, `Tests/`, `scripts/` and `tools/` — is
+MIT licensed. See [LICENSE](LICENSE).
+
+**Digimon data** — `Sources/DigiTokenBar/Resources/digidex.json` — is derived
+from [digi-api.com](https://digi-api.com), which publishes under
+[CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/) and draws mainly
+on [Wikimon](https://wikimon.net). That file is therefore **also CC BY-SA 3.0**,
+and so is anything derived from it.
+
+*Changes made:* the source records were filtered to the six main evolution
+stages, reduced to the fields this app uses (name, stage, attribute, type, field,
+evolution edges, skills, English description, image URL), edges pointing outside
+the retained set were dropped, and the result was compacted into a single JSON
+index. `tools/build_index.py` performs and documents the transformation.
+
+**Artwork** is not covered by either licence and is **not redistributed**. The
+CC BY-SA licence covers digi-api's database, not Bandai's images — Wikimon hosts
+those under its own fair-use rationale. This app ships no artwork: it fetches
+each image at runtime and caches it on the end user's own machine.
+
+### Disclaimer
+
+Digimon and Digital Monsters are trademarks of Bandai. This is an **unofficial,
+non-commercial fan project** with no affiliation with, sponsorship by, or
+endorsement from Bandai, Bandai Namco, Toei Animation, or any other rights
+holder.
 
 Inspired by [PokeTokenBar](https://github.com/chattymin/PokeTokenBar) by
 chattymin, which had the original idea of turning token spend into something you
 raise. The code here is an independent implementation.
-
-Code is MIT licensed. See [LICENSE](LICENSE).

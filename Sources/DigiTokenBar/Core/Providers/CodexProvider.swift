@@ -58,16 +58,45 @@ struct CodexProvider: UsageProvider {
         var sequence = base.count
         var fresh: [UsageEvent] = []
 
+        // Codex names the working directory in a header line and again in every
+        // turn context, but never on the usage events themselves. We carry the
+        // most recent one forward, seeded from the cache so a resumed scan that
+        // starts mid-file still knows which project it is reading.
+        var project = cache.projectHint(for: path)
+
         let end = JSONLReader.stream(path: path, from: start) { line in
-            guard let event = Self.parse(
+            if let directory = Self.workingDirectory(in: line) {
+                project = URL(fileURLWithPath: directory).lastPathComponent
+                if let project { cache.setProjectHint(project, for: path) }
+                return
+            }
+            guard var event = Self.parse(
                 line: line, session: session, sequence: sequence, path: path
             ) else { return }
+            event.project = project
             sequence += 1
             fresh.append(event)
         }
 
         cache.record(path: path, offset: end, newEvents: fresh)
         return base + fresh
+    }
+
+    /// Pulls `cwd` out of a `session_meta` or `turn_context` record.
+    static func workingDirectory(in line: Data) -> String? {
+        guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+              let type = object["type"] as? String,
+              type == "session_meta" || type == "turn_context"
+        else { return nil }
+
+        // `session_meta` nests its fields under `payload`; `turn_context` does
+        // in some versions and not in others.
+        if let payload = object["payload"] as? [String: Any],
+           let cwd = payload["cwd"] as? String, !cwd.isEmpty {
+            return cwd
+        }
+        if let cwd = object["cwd"] as? String, !cwd.isEmpty { return cwd }
+        return nil
     }
 
     static func parse(line: Data, session: String, sequence: Int, path: String) -> UsageEvent? {

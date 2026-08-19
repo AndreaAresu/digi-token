@@ -17,6 +17,14 @@ final class Settings {
         static let petOrigin = "floatingPetOrigin"
         static let notifications = "notificationsEnabled"
         static let refreshMinutes = "refreshMinutes"
+        static let growthPace = "growthPace"
+    }
+
+    /// How fast the ladder advances. Changing it re-evaluates the current
+    /// partner immediately, which can grant several rungs at once when moving
+    /// to a quicker pace — that is intended, not a glitch.
+    var growthPace: GrowthPace {
+        didSet { write(growthPace.rawValue, Key.growthPace) }
     }
 
     var showTokensInMenuBar: Bool { didSet { write(showTokensInMenuBar, Key.showTokens) } }
@@ -64,7 +72,10 @@ final class Settings {
             Key.petSize: 96.0,
             Key.notifications: true,
             Key.refreshMinutes: 2,
+            Key.growthPace: GrowthPace.standard.rawValue,
         ])
+        growthPace = GrowthPace(rawValue: defaults.string(forKey: Key.growthPace) ?? "")
+            ?? .standard
         showTokensInMenuBar = defaults.bool(forKey: Key.showTokens)
         animateSprite = defaults.bool(forKey: Key.animate)
         floatingPetEnabled = defaults.bool(forKey: Key.floatingPet)

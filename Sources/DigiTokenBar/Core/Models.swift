@@ -36,7 +36,10 @@ struct UsageEvent: Sendable, Hashable {
     let counts: TokenCounts
     let dedupKey: String
     let sessionID: String
-    let project: String?
+    /// The directory the agent was working in, where the tool records it.
+    /// Codex only names it in separate header records, so the provider fills
+    /// this in after parsing rather than at construction.
+    var project: String?
 }
 
 /// An AI coding tool we can read usage from.
@@ -78,6 +81,18 @@ struct UsageBlock: Sendable, Hashable {
     }
 }
 
+/// Where a slice of the tokens went. Agents record the directory they were
+/// working in, so "which repo is costing me" is answerable from data we already
+/// read — it just was not being shown anywhere.
+struct ProjectUsage: Sendable, Hashable, Identifiable {
+    let name: String
+    var counts: TokenCounts
+    var today: TokenCounts
+    var lastActivity: Date?
+
+    var id: String { name }
+}
+
 /// Everything we know about one tool right now.
 struct ProviderUsage: Sendable {
     let provider: ProviderID
@@ -93,6 +108,8 @@ struct ProviderUsage: Sendable {
     var activeDays: [Date] = []
     var sessionCount = 0
     var lastActivity: Date?
+    /// Biggest consumers first.
+    var projects: [ProjectUsage] = []
 }
 
 /// The aggregate the UI and the partner engine both read.

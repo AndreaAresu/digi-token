@@ -115,9 +115,11 @@ final class PartnerStore {
             return
         }
 
-        // Several rungs can fall due at once after a long gap between refreshes.
+        // Several rungs can fall due at once after a long gap between refreshes,
+        // or after the tamer switches to a quicker growth pace.
+        let pace = Settings.shared.growthPace
         while let nextStage = partner.stage.next,
-              partner.tokens >= GrowthCurve.requirement(for: nextStage),
+              partner.tokens >= GrowthCurve.requirement(for: nextStage, pace: pace),
               let current = partner.entry {
             var rng = SplitMix64(seed: partner.seed &+ UInt64(nextStage.rawValue) &* 7919)
             let roll = Double(rng.next() >> 11) / Double(1 << 53)
@@ -167,6 +169,15 @@ final class PartnerStore {
     }
 
     var canGraduate: Bool { partner.stage == .ultimate && !partner.isEgg }
+
+    /// Re-checks the ladder without a new usage scan. Needed when the growth
+    /// pace changes, since the thresholds move under a partner that has not
+    /// earned a single extra token.
+    func reevaluate() {
+        advanceIfEarned()
+        save()
+        onChange?()
+    }
 
     func rename(_ name: String) {
         partner.nickname = name.trimmingCharacters(in: .whitespacesAndNewlines)

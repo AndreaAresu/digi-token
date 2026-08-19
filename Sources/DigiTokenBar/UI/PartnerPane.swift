@@ -127,6 +127,7 @@ final class PartnerPane: NSView {
             fieldLabel.stringValue = ""
         }
 
+        let pace = Settings.shared.growthPace
         if partner.isEgg {
             progressCaption.stringValue = "Hatching"
             bar.value = min(1, Double(partner.tokens) / Double(GrowthCurve.eggHatch))
@@ -134,8 +135,8 @@ final class PartnerPane: NSView {
             progressValue.stringValue = "\(TokenFormatter.short(left)) to hatch"
         } else {
             progressCaption.stringValue = "Next digivolution"
-            bar.value = GrowthCurve.progress(tokens: partner.tokens, stage: partner.stage)
-            if let remaining = GrowthCurve.tokensToNext(tokens: partner.tokens, stage: partner.stage) {
+            bar.value = GrowthCurve.progress(tokens: partner.tokens, stage: partner.stage, pace: pace)
+            if let remaining = GrowthCurve.tokensToNext(tokens: partner.tokens, stage: partner.stage, pace: pace) {
                 progressValue.stringValue =
                     "\(TokenFormatter.short(remaining)) to \(partner.stage.next?.dubName ?? "")"
             } else {
