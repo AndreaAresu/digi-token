@@ -1,6 +1,12 @@
+import Compression
 import Foundation
 
 /// One entry of the bundled index.
+///
+/// Deliberately narrow: it holds only what the app reads. Reference-book
+/// descriptions, attack lists and reverse-evolution edges are available from
+/// digi-api but were 61% of the shipped file and were never displayed, so the
+/// generator discards them.
 struct DigimonEntry: Codable, Sendable, Hashable, Identifiable {
     let id: Int
     let name: String
@@ -11,10 +17,7 @@ struct DigimonEntry: Codable, Sendable, Hashable, Identifiable {
     let types: [String]
     let fields: [String]
     let img: String
-    let desc: String
     let next: [Int]
-    let prior: [Int]
-    let skills: [String]
 
     var attribute: DigiAttribute {
         attrs.compactMap(DigiAttribute.init(raw:)).first ?? .free
@@ -125,10 +128,11 @@ final class DigiDex: @unchecked Sendable {
 
     private init() {
         guard let url = DigiDex.indexURL(),
-              let data = try? Data(contentsOf: url),
+              let packed = try? Data(contentsOf: url),
+              let data = DigiDex.inflate(packed),
               let payload = try? JSONDecoder().decode(Payload.self, from: data)
         else {
-            assertionFailure("digidex.json not found")
+            assertionFailure("digidex.bin missing or unreadable")
             return
         }
         all = payload.digimon
@@ -140,18 +144,49 @@ final class DigiDex: @unchecked Sendable {
     /// the sources when running from a checkout — so both `build-app.sh` output
     /// and a bare `swiftc` run find it without a package manager involved.
     private static func indexURL() -> URL? {
-        if let bundled = Bundle.main.url(forResource: "digidex", withExtension: "json") {
+        if let bundled = Bundle.main.url(forResource: "digidex", withExtension: "bin") {
             return bundled
         }
         let fallbacks = [
             URL(fileURLWithPath: #filePath)
                 .deletingLastPathComponent()   // Digi
                 .deletingLastPathComponent()   // DigiTokenBar
-                .appendingPathComponent("Resources/digidex.json"),
+                .appendingPathComponent("Resources/digidex.bin"),
             URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-                .appendingPathComponent("Sources/DigiTokenBar/Resources/digidex.json"),
+                .appendingPathComponent("Sources/DigiTokenBar/Resources/digidex.bin"),
         ]
         return fallbacks.first { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    /// Expands the raw-DEFLATE index.
+    ///
+    /// The uncompressed index is 329 KB of JSON; deflated it is 51 KB, which is
+    /// most of the app's download. `tools/build_index.py` writes raw DEFLATE
+    /// with no zlib header precisely because that is what `COMPRESSION_ZLIB`
+    /// expects.
+    static func inflate(_ packed: Data) -> Data? {
+        // Generous but bounded: the index is a known size and a corrupt file
+        // should fail rather than be allowed to allocate without limit.
+        let capacity = 4 << 20
+        var output = Data(count: capacity)
+
+        let written = output.withUnsafeMutableBytes { destination -> Int in
+            guard let destinationBase = destination.bindMemory(to: UInt8.self).baseAddress
+            else { return 0 }
+            return packed.withUnsafeBytes { source -> Int in
+                guard let sourceBase = source.bindMemory(to: UInt8.self).baseAddress
+                else { return 0 }
+                return compression_decode_buffer(
+                    destinationBase, capacity,
+                    sourceBase, packed.count,
+                    nil, COMPRESSION_ZLIB
+                )
+            }
+        }
+
+        guard written > 0, written < capacity else { return nil }
+        output.removeSubrange(written...)
+        return output
     }
 
     func entry(_ id: Int) -> DigimonEntry? { byID[id] }
