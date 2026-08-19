@@ -117,6 +117,9 @@ final class PartnerStore {
             wallet.hasBaseline = true
         }
         wallet.update(allTimeBillable: allTimeBillable)
+        // Charges follow the same meter as the currency: work done since
+        // install, never elapsed time.
+        wallet.dna.accrue(earned: wallet.earned)
         spendStreakFreezesIfNeeded(snapshot: snapshot)
 
         profile = CareEngine.profile(from: snapshot, events: events, frozenDays: frozenDays)
@@ -283,6 +286,14 @@ final class PartnerStore {
 
         case .gradedEgg:
             nextEggField = field
+
+        case .dnaCharge:
+            guard !wallet.dna.isFull else {
+                return .notApplicable(
+                    "Your DNA charge is already full at \(DNACharge.cap). Spend one on a Jogress first."
+                )
+            }
+            wallet.dna.stock += 1
         }
 
         wallet.spent += item.price
@@ -293,7 +304,7 @@ final class PartnerStore {
 
     /// What the shop should say is currently in effect.
     var activeEffects: [String] {
-        var effects: [String] = []
+        var effects: [String] = [dnaChargeSummary]
         if let field = partner.preferredField {
             effects.append("Compass pointing at \(field)")
         }
@@ -313,6 +324,17 @@ final class PartnerStore {
         return effects
     }
 
+    /// The charge meter in one line, always shown: it is standing state rather
+    /// than a temporary effect, and a tamer about to fuse needs to know where it
+    /// stands before they pick a partner to spend.
+    var dnaChargeSummary: String {
+        let dna = wallet.dna
+        let head = "DNA charge \(dna.stock)/\(DNACharge.cap)"
+        return dna.isFull
+            ? "\(head) — full"
+            : "\(head) · \(TokenFormatter.short(dna.tokensToNext)) to the next"
+    }
+
     /// Re-checks the ladder without a new usage scan. Needed when the growth
     /// pace changes, since the thresholds move under a partner that has not
     /// earned a single extra token.
@@ -329,9 +351,15 @@ final class PartnerStore {
 
     /// Fuses two collected partners. The result joins the collection as a form
     /// neither line reached on its own.
+    ///
+    /// Reports why it did not happen rather than returning nil for three
+    /// different reasons — the pane has to be able to say which one it was.
     @discardableResult
-    func jogress(_ a: Partner, _ b: Partner) -> DigimonEntry? {
-        guard let result = Digivolution.jogress(a, b) else { return nil }
+    func jogress(_ a: Partner, _ b: Partner) -> JogressResult {
+        guard let result = Digivolution.jogress(a, b) else { return .noRoute }
+        // Spent only once the fusion is known to be possible, and before either
+        // partner is removed below.
+        guard wallet.dna.spend() else { return .noCharge }
         var fused = Partner(seed: a.seed ^ b.seed)
         fused.digimonID = result.entry.id
         fused.stage = result.entry.stageLabel ?? .ultimate
@@ -344,7 +372,8 @@ final class PartnerStore {
         collection.append(fused)
         record(result.entry, isX: result.isXAntibody)
         save()
-        return result.entry
+        onChange?()
+        return .fused(result.entry.name)
     }
 
     // MARK: - Tamer cards
@@ -361,6 +390,9 @@ final class PartnerStore {
         case fused(String)
         case notInCollection
         case noRoute
+        /// The fusion is possible, the meter is empty. Checked before anything
+        /// is consumed, so a tamer never loses a partner to a failed Jogress.
+        case noCharge
     }
 
     /// The card for the current partner, or nil while it is still an egg —
@@ -433,6 +465,9 @@ final class PartnerStore {
     func jogress(_ mine: Partner, with card: TamerCard) -> JogressResult {
         guard collection.contains(where: { $0.id == mine.id }) else { return .notInCollection }
         guard let result = Digivolution.jogress(mine, card.partner) else { return .noRoute }
+        // Checked before the partner is removed below: an empty meter must cost
+        // nothing, least of all a graduated partner.
+        guard wallet.dna.spend() else { return .noCharge }
 
         var fused = Partner(seed: mine.seed ^ card.seed)
         fused.digimonID = result.entry.id
