@@ -5,7 +5,13 @@ We bundle *data only* (names, stages, attributes, evolution edges) — never
 artwork. Images stay remote and are fetched + cached at runtime, which keeps the
 binary small and the fan-project posture clean.
 
-Usage:  python3 tools/build_index.py [--out Sources/DigiTokenBar/Resources/digidex.json]
+The index carries only fields the app actually reads. Reference-book
+descriptions, attack lists and reverse-evolution edges are fetched and then
+discarded: together they were 61% of an uncompressed index nothing ever looked
+at. The result is zlib-deflated, which takes the shipped file from 921 KB to
+about 50 KB.
+
+Usage:  python3 tools/build_index.py [--out Sources/DigiTokenBar/Resources/digidex.bin]
 """
 
 from __future__ import annotations
@@ -17,6 +23,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import zlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 API = "https://digi-api.com/api/v1"
@@ -68,15 +75,6 @@ def fetch_detail(entry: dict) -> dict:
     return d
 
 
-def english_description(detail: dict) -> str:
-    for d in detail.get("descriptions") or []:
-        if d.get("language", "").startswith("en"):
-            text = (d.get("description") or "").strip()
-            if text:
-                return text[:400]
-    return ""
-
-
 def best_image(detail: dict) -> str:
     images = detail.get("images") or []
     if not images:
@@ -106,16 +104,13 @@ def compact(detail: dict) -> dict | None:
         "types": [t["type"] for t in detail.get("types") or []],
         "fields": [f["field"] for f in detail.get("fields") or []],
         "img": best_image(detail),
-        "desc": english_description(detail),
         "next": sorted({e["id"] for e in detail.get("nextEvolutions") or []}),
-        "prior": sorted({e["id"] for e in detail.get("priorEvolutions") or []}),
-        "skills": [s["skill"] for s in (detail.get("skills") or [])[:4]],
     }
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default="Sources/DigiTokenBar/Resources/digidex.json")
+    ap.add_argument("--out", default="Sources/DigiTokenBar/Resources/digidex.bin")
     ap.add_argument("--workers", type=int, default=12)
     args = ap.parse_args()
 
@@ -143,7 +138,6 @@ def main() -> int:
     # Drop edges pointing at entries we filtered out, so the graph stays closed.
     for m in mons:
         m["next"] = [i for i in m["next"] if i in known]
-        m["prior"] = [i for i in m["prior"] if i in known]
     mons.sort(key=lambda m: m["id"])
 
     payload = {
@@ -154,14 +148,23 @@ def main() -> int:
         "digimon": mons,
     }
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    with open(args.out, "w", encoding="utf-8") as f:
-        json.dump(payload, f, separators=(",", ":"), ensure_ascii=False)
+    blob = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    # Raw DEFLATE with no zlib header or checksum: that is exactly what Apple's
+    # Compression framework means by `.zlib`, and what the app decodes with.
+    deflate = zlib.compressobj(9, zlib.DEFLATED, -zlib.MAX_WBITS)
+    packed = deflate.compress(blob) + deflate.flush()
+    with open(args.out, "wb") as f:
+        f.write(packed)
 
     by_stage: dict[str, int] = {}
     for m in mons:
         by_stage[m["stage"]] = by_stage.get(m["stage"], 0) + 1
     size = os.path.getsize(args.out)
-    print(f"\nwrote {args.out}  ({len(mons)} digimon, {size/1024:.0f} KB)", file=sys.stderr)
+    print(
+        f"\nwrote {args.out}  ({len(mons)} digimon, "
+        f"{size/1024:.0f} KB deflated from {len(blob)/1024:.0f} KB)",
+        file=sys.stderr,
+    )
     print(f"by stage: {by_stage}", file=sys.stderr)
     print(f"x-antibody: {sum(1 for m in mons if m['x'])}", file=sys.stderr)
     return 0

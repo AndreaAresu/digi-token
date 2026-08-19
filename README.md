@@ -110,7 +110,7 @@ line reached alone.
 DIGITOKENBAR_OPEN=1 ./build/DigiTokenBar.app/Contents/MacOS/DigiTokenBar
 ```
 
-`tools/build_index.py` regenerates `Sources/DigiTokenBar/Resources/digidex.json`
+`tools/build_index.py` regenerates `Sources/DigiTokenBar/Resources/digidex.bin`
 from digi-api.com. It bundles **data only** — 1,259 Digimon with stages,
 attributes, fields and the evolution graph, about 900 KB. No artwork ships in
 the binary, which is why the whole app is around 1.3 MB.
@@ -210,7 +210,7 @@ not come from the same place.
 **Code** — everything under `Sources/`, `Tests/`, `scripts/` and `tools/` — is
 MIT licensed. See [LICENSE](LICENSE).
 
-**Digimon data** — `Sources/DigiTokenBar/Resources/digidex.json` — is derived
+**Digimon data** — `Sources/DigiTokenBar/Resources/digidex.bin` — is derived
 from [digi-api.com](https://digi-api.com), which publishes under
 [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/) and draws mainly
 on [Wikimon](https://wikimon.net). That file is therefore **also CC BY-SA 3.0**,

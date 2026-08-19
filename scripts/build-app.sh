@@ -36,7 +36,7 @@ echo "==> assembling $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 mv "$BUILD_DIR/$APP_NAME" "$APP/Contents/MacOS/$APP_NAME"
-cp Sources/DigiTokenBar/Resources/digidex.json "$APP/Contents/Resources/"
+cp Sources/DigiTokenBar/Resources/digidex.bin "$APP/Contents/Resources/"
 [ -f assets/AppIcon.icns ] && cp assets/AppIcon.icns "$APP/Contents/Resources/"
 
 if [ "$CONFIG" = "release" ]; then
