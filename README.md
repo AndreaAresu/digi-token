@@ -171,7 +171,8 @@ scanning, the full growth ladder, care-driven branching, the X-Antibody roll,
 the DigiDex, idle animation, the floating pet, notifications, and Jogress in the
 model layer.
 
-Not built yet: localisation and a Jogress UI.
+Not built yet: localisation, a Jogress UI, and a screen for the collection —
+see [TODO.md](TODO.md) for the list, with what each one would take.
 
 ## The shop
 
