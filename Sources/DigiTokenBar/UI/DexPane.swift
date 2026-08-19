@@ -189,7 +189,10 @@ final class DexPane: NSView {
     /// reference entry would hand over exactly what it is meant to withhold.
     private func present(_ entry: DigimonEntry) {
         guard store.seenDigimon.contains(entry.id) else { return }
-        detail.show(entry) { [weak self] in
+        detail.show(
+            entry,
+            xChance: CareEngine.xAntibodyChance(profile: store.profile, hasCharm: false)
+        ) { [weak self] in
             self?.detail.isHidden = true
         }
         detail.isHidden = false
@@ -244,7 +247,23 @@ final class DexCell: NSView {
         name.lineBreakMode = .byTruncatingTail
         name.cell?.wraps = true
 
-        let stack = UI.stack(.vertical, spacing: 2, [sprite, name])
+        // Rarity is shown for met forms only. It is public information about
+        // the graph rather than about the tamer, but printing it under a
+        // silhouette would say which of the unmet ones are worth chasing —
+        // which is the one thing the three states exist to withhold.
+        var badges: [NSView] = []
+        if seen {
+            let stars = RarityStars(size: 7)
+            stars.show(DigiDex.shared.rarity(of: entry), routes: DigiDex.shared.routesInto(entry.id))
+            badges.append(stars)
+            if entry.x {
+                badges.append(UI.label("X", size: 7, weight: .heavy, color: Theme.danger))
+            }
+        }
+        let badgeRow = UI.stack(.horizontal, spacing: 3, badges)
+        badgeRow.alignment = .centerY
+
+        let stack = UI.stack(.vertical, spacing: 2, [sprite, name, badgeRow])
         stack.alignment = .centerX
         addSubview(stack)
         NSLayoutConstraint.activate([

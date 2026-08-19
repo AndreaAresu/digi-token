@@ -78,6 +78,9 @@ enum SelfTest {
         section("Tamer cards")
         await testTamerCards()
 
+        section("Rarity stars")
+        testRarityStars()
+
         section("Dex detail")
         testDexDetail()
 
@@ -1213,6 +1216,67 @@ enum SelfTest {
 
     /// Rarity is a description of the evolution graph, not a balance knob, so
     /// what is pinned here is that it keeps describing the graph.
+    /// The stars are a second reading of the route count, so what has to be
+    /// pinned is that they cannot say anything the count does not.
+    static func testRarityStars() {
+        expect(DigiRarity(routes: 12).stars == 1, "a common form is one star")
+        expect(DigiRarity(routes: 4).stars == 2, "an uncommon form is two")
+        expect(DigiRarity(routes: 1).stars == 3, "a rare form is three")
+        expect(
+            DigiRarity(routes: 0).stars == nil,
+            "a form nothing routes into is off the scale, not at the top of it"
+        )
+
+        // Monotonic and bounded across the whole range the graph produces. A
+        // scale that crossed over somewhere would be worse than no scale.
+        var previous = DigiRarity.starScale + 1
+        var monotonic = true
+        var onScale = true
+        for routes in 0...200 {
+            guard let stars = DigiRarity(routes: routes).stars else { continue }
+            if stars > previous { monotonic = false }
+            if !(1...DigiRarity.starScale).contains(stars) { onScale = false }
+            previous = stars
+        }
+        expect(monotonic, "stars never rise as the route count rises")
+        expect(onScale, "every form lands on the \(DigiRarity.starScale)-star scale or off it")
+
+        // The X-Antibody question, answered from the shipped index rather than
+        // from intuition: an X form is *not* harder to route to. Its median is
+        // above the roster's, and a larger share of X forms are Common. So the
+        // stars must not treat X as a tier — what makes one rare is the roll at
+        // the digivolution, which is a different axis and is stated separately.
+        let dex = DigiDex.shared
+        func median(_ entries: [DigimonEntry]) -> Int {
+            let routes = entries.map { dex.routesInto($0.id) }.sorted()
+            return routes.isEmpty ? 0 : routes[routes.count / 2]
+        }
+        let xForms = dex.all.filter(\.x)
+        expect(xForms.count > 100, "the index carries X forms to reason about (\(xForms.count))")
+        expect(
+            median(xForms) >= median(dex.all),
+            "X forms are not rarer on the graph (median \(median(xForms)) against \(median(dex.all)))"
+        )
+        let xCommon = xForms.filter { DigiRarity(routes: dex.routesInto($0.id)) == .common }.count
+        let allCommon = dex.all.filter { DigiRarity(routes: dex.routesInto($0.id)) == .common }.count
+        expect(
+            Double(xCommon) / Double(xForms.count) > Double(allCommon) / Double(dex.all.count),
+            "more of the X roster is Common than of the roster at large "
+                + "(\(xCommon * 100 / xForms.count)% against \(allCommon * 100 / dex.all.count)%)"
+        )
+
+        // And the axis that does make it rare, so the card's claim has a number
+        // behind it like every other claim in the app.
+        var disciplined = CareProfile()
+        disciplined.discipline = 100
+        let best = CareEngine.xAntibodyChance(profile: disciplined, hasCharm: false)
+        expect(best < 0.05, "even a perfect streak leaves the X roll rare (\(String(format: "%.1f%%", best * 100)))")
+        expect(
+            best > CareEngine.xAntibodyChance(profile: CareProfile(), hasCharm: false),
+            "discipline is what improves the roll"
+        )
+    }
+
     static func testDexDetail() {
         let dex = DigiDex.shared
 

@@ -250,6 +250,27 @@ enum DigiRarity: Sendable, Hashable {
         }
     }
 
+    /// The scale the grid draws. Three, because there are three tiers that the
+    /// route count actually separates — a fourth star would have to be invented.
+    static let starScale = 3
+
+    /// Filled stars out of `starScale`, or `nil` for a form nothing routes into.
+    ///
+    /// "Off the graph" is deliberately not the top of the scale. It is a
+    /// different statement: not "harder to reach than rare" but "not reachable
+    /// by any recorded line at all", which is how a fallback branch or a Jogress
+    /// can hand you one without it being an achievement. Giving it four stars
+    /// would be claiming something the graph does not say, so it gets its own
+    /// mark instead.
+    var stars: Int? {
+        switch self {
+        case .common: 1
+        case .uncommon: 2
+        case .rare: 3
+        case .unreachable: nil
+        }
+    }
+
     /// Said plainly, because "Off the graph" on its own sounds like a bug.
     func detail(routes: Int) -> String {
         switch self {
