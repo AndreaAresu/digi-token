@@ -441,6 +441,17 @@ enum SelfTest {
             "the result is cropped to the artwork (\(Int(processed.size.width))x\(Int(processed.size.height)))"
         )
 
+        // `size` is in points and the crop is measured in pixels. `lockFocus` on
+        // a Retina display backs an 80-point image with 160 pixels, so returning
+        // the pixel count as the size would declare every sprite twice its real
+        // size — which is what made the crop check above read as "larger than
+        // the input". Pin the ratio, not just the direction.
+        expect(
+            abs(Double(sampler.width) / processed.size.width - backingScale(of: image)) < 0.01,
+            "the processed sprite keeps the source's pixels-per-point"
+                + " (\(sampler.width)px over \(Int(processed.size.width))pt)"
+        )
+
         // An image that is already a cut-out must be trimmed, not re-keyed.
         let cutout = NSImage(size: NSSize(width: size, height: size))
         cutout.lockFocus()
@@ -452,6 +463,16 @@ enum SelfTest {
             trimmed.size.width < 40 && trimmed.size.height < 40,
             "an existing cut-out is trimmed to its content (\(Int(trimmed.size.width))x\(Int(trimmed.size.height)))"
         )
+    }
+
+    /// Pixels per point of an image's backing store, which is 2 for anything
+    /// drawn with `lockFocus` on a Retina display and 1 for a plain decode.
+    static func backingScale(of image: NSImage) -> Double {
+        var rect = NSRect(origin: .zero, size: image.size)
+        guard let cg = image.cgImage(forProposedRect: &rect, context: nil, hints: nil),
+              image.size.width > 0
+        else { return 1 }
+        return Double(cg.width) / Double(image.size.width)
     }
 
     /// Minimal RGBA reader, so the checks above can talk about pixels.

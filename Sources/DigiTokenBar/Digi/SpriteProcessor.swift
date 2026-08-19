@@ -39,7 +39,26 @@ enum SpriteProcessor {
         guard let stripped = makeImage(buffer, width: width, height: height) else { return image }
         guard let cropped = stripped.cropping(to: bounds) else { return image }
 
-        return NSImage(cgImage: cropped, size: NSSize(width: bounds.width, height: bounds.height))
+        return NSImage(cgImage: cropped, size: pointSize(of: bounds, pixels: source, points: image))
+    }
+
+    /// The crop is measured in pixels, but an `NSImage`'s `size` is in points.
+    ///
+    /// The two are only the same when the source happens to be 1x. Anything that
+    /// carries a backing scale — an image drawn with `lockFocus` on a Retina
+    /// display, or a download whose DPI metadata says otherwise — has twice the
+    /// pixels per point, and handing those pixel counts to `NSImage(cgImage:size:)`
+    /// declares the sprite twice as large as it is. Everything downstream sizes
+    /// itself off `size`, so the sprite would be laid out at double scale and
+    /// drawn soft, and `SpriteLoader.flatten` would build its silhouette canvas
+    /// on the same inflated number.
+    private static func pointSize(of bounds: CGRect, pixels: CGImage, points: NSImage) -> NSSize {
+        let scaleX = points.size.width > 0 ? CGFloat(pixels.width) / points.size.width : 1
+        let scaleY = points.size.height > 0 ? CGFloat(pixels.height) / points.size.height : 1
+        guard scaleX.isFinite, scaleY.isFinite, scaleX > 0, scaleY > 0 else {
+            return NSSize(width: bounds.width, height: bounds.height)
+        }
+        return NSSize(width: bounds.width / scaleX, height: bounds.height / scaleY)
     }
 
     // MARK: - Pixel plumbing
