@@ -74,6 +74,9 @@ final class UsagePane: NSView {
             contentStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
             contentStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             contentStack.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+            // Without this the pane reports zero height, its scroll view finds
+            // nothing to scroll, and everything below the fold is unreachable.
+            contentStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -14),
             picker.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
             row1.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
             row2.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
