@@ -18,6 +18,7 @@ final class TamerPane: NSView {
     private let status = UI.label("", size: 10, color: .secondaryLabelColor)
     private let friendStack = UI.stack(.vertical, spacing: 8, [])
     private let friendsEmpty = UI.label("", size: 10, color: .tertiaryLabelColor)
+    private let chargeNote = UI.label("", size: 9, color: .secondaryLabelColor, mono: true)
     private let eggNote = UI.label("", size: 10, color: .secondaryLabelColor)
 
     init(store: PartnerStore) {
@@ -47,7 +48,7 @@ final class TamerPane: NSView {
         copyButton.action = #selector(copyCard)
         pasteButton.action = #selector(pasteCard)
 
-        for label in [status, friendsEmpty, eggNote] {
+        for label in [status, friendsEmpty, eggNote, chargeNote] {
             label.maximumNumberOfLines = 0
             label.lineBreakMode = .byWordWrapping
             label.preferredMaxLayoutWidth = Theme.popoverWidth - 28
@@ -61,7 +62,7 @@ final class TamerPane: NSView {
         ])
 
         let friends = UI.stack(.vertical, spacing: 8, [
-            UI.caption("Other tamers"), friendsEmpty, friendStack,
+            UI.caption("Other tamers"), chargeNote, friendsEmpty, friendStack,
         ])
 
         let root = UI.stack(.vertical, spacing: 16, [mine, friends])
@@ -79,6 +80,7 @@ final class TamerPane: NSView {
             buttons.widthAnchor.constraint(equalTo: mine.widthAnchor),
             status.widthAnchor.constraint(equalTo: mine.widthAnchor),
             eggNote.widthAnchor.constraint(equalTo: mine.widthAnchor),
+            chargeNote.widthAnchor.constraint(equalTo: friends.widthAnchor),
             friendsEmpty.widthAnchor.constraint(equalTo: friends.widthAnchor),
             friendStack.widthAnchor.constraint(equalTo: friends.widthAnchor),
         ])
@@ -100,6 +102,13 @@ final class TamerPane: NSView {
                 "Your DigiTama has not hatched yet. A card describes a partner, so there is "
                 + "nothing to hand over until there is one."
         }
+
+        // Shown next to the fusion buttons rather than only in the shop: a
+        // tamer picking which partner to spend needs to know the meter is empty
+        // before they pick, not after.
+        let dna = store.wallet.dna
+        chargeNote.stringValue = store.dnaChargeSummary
+        chargeNote.textColor = dna.stock > 0 ? Theme.accent : .tertiaryLabelColor
 
         rebuildFriends()
     }
@@ -234,6 +243,14 @@ final class TamerPane: NSView {
             status.textColor = Theme.danger
         case .noRoute:
             status.stringValue = "Those two have no fusion between them."
+            status.textColor = Theme.danger
+        case .noCharge:
+            // Nothing was consumed: the charge is checked before the partner is
+            // removed, so the collection is exactly as it was.
+            status.stringValue =
+                "No DNA Charge. \(chosen.displayName) is untouched — charges come back as you "
+                + "work (\(TokenFormatter.short(store.wallet.dna.tokensToNext)) to the next), "
+                + "or buy one in the shop."
             status.textColor = Theme.danger
         }
         refresh()

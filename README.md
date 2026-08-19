@@ -190,12 +190,26 @@ is no medicine and no rare candy, however traditional both are.
 | Streak Freeze | 150K | Covers one idle day. Bought ahead, spent automatically, always shown as frozen. |
 | Field Compass | 400K | **Guarantees** the next digivolution lands in one Digital World field. |
 | X-Antibody Vial | 1.5M | Settles the X-Antibody roll at the next digivolution. |
+| DNA Charge | 1M | One Jogress. Three at most, and they refill on their own as you work. |
 | Graded DigiTama | 800K | Your next egg carries an affinity, honoured at its first digivolution that can. |
 
 The freeze is the interesting case. Duolingo's works because you buy it *before*
 the lapse — it is insurance, not an undo. The honesty is preserved by making it
 visible: your streak reads `12d · 2 frozen`, never a bare 12. Softening a
 consequence is fine; hiding that it was softened is not.
+
+A **DNA Charge** is what a Jogress costs. One charge per fusion, three at most,
+and the meter refills from **billable tokens — never from the clock**: 2.5M of
+work per charge. A meter that refilled overnight would be handing out fusions
+for waiting, and waiting is the one thing this app has no way to see you do.
+Buying one is still buying ahead of an outcome, since the form a fusion produces
+is seeded from both partners and is not known when you pay. While the meter is
+full it banks nothing, so charges cannot be stockpiled against a spree.
+
+The charge is checked before anything is consumed. A Jogress attempted on an
+empty meter leaves your collection exactly as it was — the message says so, and
+a test pins it, because losing a graduated partner to a failed fusion would be
+the worst bug in the app.
 
 A compass narrows the candidate pool rather than merely weighting it. Buying a
 direction and then watching the roll ignore you would be the worst of both
@@ -249,10 +263,10 @@ talk to each other, so the format is built for a chat window: it survives being
 wrapped across lines, and a checksum means a truncated paste is *refused* rather
 than silently decoding into a different partner.
 
-Fusing spends one of your own retired partners and leaves the visitor untouched
-— their card is a photograph, not a transfer of custody, and nothing here reaches
-their machine. The outcome is seeded from both partners, so re-importing a card
-is not a way to reroll a form you did not like.
+Fusing costs a **DNA Charge** and spends one of your own retired partners; the
+visitor is left untouched — their card is a photograph, not a transfer of
+custody, and nothing here reaches their machine. The outcome is seeded from both
+partners, so re-importing a card is not a way to reroll a form you did not like.
 
 ## The DigiDex
 

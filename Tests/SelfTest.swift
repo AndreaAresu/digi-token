@@ -544,6 +544,20 @@ enum SelfTest {
         let b = Digivolution.hatch(seed: 18_142_757_285_949_799_043, profile: CareProfile())
         expect(a?.entry.id == b?.entry.id, "the same seed rebuilds the same partner")
 
+        // A wallet written before DNA charges existed. `Wallet` is held by
+        // `SaveFile`, so a wallet that will not decode takes the partner with
+        // it — the exact failure this project has already paid for once.
+        // Note the inventory shape: a dictionary keyed by an enum encodes as a
+        // flat array, which is what is actually on disk.
+        let oldWallet = #"""
+        {"baseline":10,"hasBaseline":true,"spent":5,"earned":900,
+         "inventory":["streakFreeze",2]}
+        """#
+        let wallet = try? JSONDecoder().decode(Wallet.self, from: Data(oldWallet.utf8))
+        expect(wallet?.earned == 900, "a wallet saved before charges existed still decodes")
+        expect(wallet?.stock(of: .streakFreeze) == 2, "its inventory survives")
+        expect(wallet?.dna.stock == 0, "the charge meter added later defaults cleanly")
+
         // A save missing the seed is genuinely unreadable and must fail loudly
         // rather than decode into a partner with a zero seed.
         let broken = #"{"tokens":100}"#
@@ -572,6 +586,58 @@ enum SelfTest {
         expect(funded.canAfford(compass), "affordability compares against the balance")
         funded.spent = funded.earned
         expect(!funded.canAfford(compass), "spending everything ends affordability")
+
+        // DNA charges: earned by work, capped, and never refilled by the clock.
+        var dna = DNACharge()
+        dna.accrue(earned: DNACharge.tokensPerCharge - 1)
+        expect(dna.stock == 0, "a charge is not handed over before the work is done")
+        expect(
+            dna.tokensToNext == 1,
+            "the meter reports what is left (\(dna.tokensToNext))"
+        )
+        dna.accrue(earned: DNACharge.tokensPerCharge)
+        expect(dna.stock == 1, "the charge lands on the token that earns it")
+
+        // The same tokens must not be counted twice: `accrue` is called on
+        // every refresh, and a refresh that found no new work is the common case.
+        dna.accrue(earned: DNACharge.tokensPerCharge)
+        dna.accrue(earned: DNACharge.tokensPerCharge)
+        expect(dna.stock == 1, "an idle refresh does not mint charges")
+
+        // Time is deliberately not an input. Nothing here can move the meter
+        // except tokens, and this is the check that says so.
+        dna.accrue(earned: DNACharge.tokensPerCharge * 12)
+        expect(dna.stock == DNACharge.cap, "the meter stops at the cap (\(dna.stock))")
+        expect(dna.progress == 0, "a full meter banks nothing against the next charge")
+        expect(dna.spend(), "a held charge can be spent")
+        expect(dna.stock == DNACharge.cap - 1, "spending takes exactly one")
+
+        // A tamer already using the app when charges arrived has done the work
+        // and gets credit for it rather than starting from zero.
+        var adopted = DNACharge()
+        adopted.accrue(earned: DNACharge.tokensPerCharge * 2)
+        expect(adopted.stock == 2, "an existing wallet is credited for work already done")
+
+        // Pruned logs re-anchor the wallet downward; that must not pay out again
+        // on the way back up.
+        var reanchored = DNACharge()
+        reanchored.accrue(earned: DNACharge.tokensPerCharge * 2)
+        reanchored.accrue(earned: 0)
+        reanchored.accrue(earned: DNACharge.tokensPerCharge)
+        expect(reanchored.stock == 2, "a re-anchored wallet does not pay twice")
+
+        var empty = DNACharge()
+        expect(!empty.spend(), "an empty meter cannot be spent")
+
+        // Buying is capped by the same ceiling the meter is.
+        var stocked = Wallet()
+        stocked.update(allTimeBillable: 0)
+        stocked.update(allTimeBillable: 40_000_000)
+        stocked.dna.stock = DNACharge.cap
+        expect(
+            stocked.stock(of: .dnaCharge) == DNACharge.cap,
+            "the shop row counts the meter, not the inventory"
+        )
 
         // Nothing in the catalogue may undo the past. This is the rule the whole
         // design rests on, so it is asserted rather than left to review.
@@ -993,16 +1059,18 @@ enum SelfTest {
         graduated.lineage = [sample.id]
         graduated.retiredAt = Date()
 
-        func makeStore(collection: [Partner]) -> PartnerStore? {
+        func makeStore(collection: [Partner], charges: Int = 1) -> PartnerStore? {
             let url = URL(
                 fileURLWithPath: NSTemporaryDirectory() + "digitest-cards-\(UUID()).json"
             )
             var seed = Partner(seed: 4_242)
             seed.digimonID = sample.id
             seed.stage = .adult
+            var wallet = Wallet()
+            wallet.dna.stock = charges
             let file = PartnerStore.SaveFile(
                 partner: seed, collection: collection, seenDigimon: [sample.id],
-                seenXAntibody: [], baseline: 0, hasBaseline: true
+                seenXAntibody: [], baseline: 0, hasBaseline: true, profile: nil, wallet: wallet
             )
             guard let data = try? JSONEncoder().encode(file),
                   (try? data.write(to: url, options: .atomic)) != nil
@@ -1039,6 +1107,22 @@ enum SelfTest {
             "a partner outside the collection cannot be spent"
         )
 
+        // A Jogress costs a DNA Charge, and an empty meter must cost nothing
+        // else. The partner it would have spent has to still be there.
+        guard let unfunded = makeStore(collection: [graduated], charges: 0) else {
+            expect(false, "a store with no charges can be built")
+            return
+        }
+        unfunded.importCard(friendCode)
+        expect(
+            unfunded.jogress(graduated, with: friend) == .noCharge,
+            "a Jogress without a DNA Charge is refused"
+        )
+        expect(
+            unfunded.collection.contains { $0.id == graduated.id },
+            "the refused Jogress consumed nothing"
+        )
+
         // The real path: a graduated partner fuses and is consumed.
         guard let fusing = makeStore(collection: [graduated]) else {
             expect(false, "a store with a collection can be built")
@@ -1058,6 +1142,7 @@ enum SelfTest {
             "the partner that was spent is gone"
         )
         expect(fusing.friends.count == 1, "the visiting tamer's card is not consumed")
+        expect(fusing.wallet.dna.stock == 0, "the fusion spent the charge")
         expect(
             fusing.seenDigimon.count > 1,
             "the fused form is recorded in the DigiDex"
