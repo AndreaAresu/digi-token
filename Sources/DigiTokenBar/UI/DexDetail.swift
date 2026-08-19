@@ -18,6 +18,8 @@ final class DexDetailView: NSView {
     private let skillsLabel = UI.label("", size: 10, color: .secondaryLabelColor)
     private let routesLabel = UI.label("", size: 9, color: .tertiaryLabelColor)
     private let xBadge = UI.label("", size: 9, weight: .heavy, color: Theme.danger)
+    private let xNote = UI.label("", size: 9, color: .tertiaryLabelColor)
+    private let stars = RarityStars(size: 11)
     private let scroll = NSScrollView()
 
     private var shown: Int?
@@ -39,14 +41,14 @@ final class DexDetailView: NSView {
         close.toolTip = "Back to the DigiDex"
 
         let cardWidth = Theme.popoverWidth - 32
-        for label in [summaryLabel, skillsLabel, traitsLabel, rarityDetail, routesLabel] {
+        for label in [summaryLabel, skillsLabel, traitsLabel, rarityDetail, routesLabel, xNote] {
             UI.wraps(label, width: cardWidth)
         }
         UI.wraps(nameLabel, lines: 2, width: cardWidth)
 
-        let rarityRow = UI.stack(.horizontal, spacing: 6, [rarityLabel, xBadge, UI.spacer()])
+        let rarityRow = UI.stack(.horizontal, spacing: 6, [stars, rarityLabel, xBadge, UI.spacer()])
         let heading = UI.stack(.vertical, spacing: 2, [
-            nameLabel, stageLabel, rarityRow, rarityDetail,
+            nameLabel, stageLabel, rarityRow, rarityDetail, xNote,
         ])
 
         let body = UI.stack(.vertical, spacing: 12, [
@@ -99,7 +101,10 @@ final class DexDetailView: NSView {
         return stack
     }
 
-    func show(_ entry: DigimonEntry, onClose: @escaping () -> Void) {
+    /// `xChance` is the tamer's own odds of an X-Antibody form at the next
+    /// digivolution, passed in because the card has no business reading the
+    /// care profile itself.
+    func show(_ entry: DigimonEntry, xChance: Double, onClose: @escaping () -> Void) {
         self.onClose = onClose
         guard shown != entry.id else { return }
         shown = entry.id
@@ -119,7 +124,18 @@ final class DexDetailView: NSView {
         rarityLabel.stringValue = rarity.label.uppercased()
         rarityLabel.textColor = Theme.rarity(rarity)
         rarityDetail.stringValue = rarity.detail(routes: routes)
+        stars.show(rarity, routes: routes)
         xBadge.stringValue = entry.x ? "X-ANTIBODY" : ""
+
+        // The X is not a rarity tier, and the stars deliberately do not treat it
+        // as one: X forms sit slightly *below* the roster average for routes in.
+        // What makes one hard to get is the roll at the digivolution, so that is
+        // the number worth printing here.
+        xNote.isHidden = !entry.x
+        xNote.stringValue = entry.x
+            ? "The X is a roll, not a route: about 1 in \(Int((1 / max(xChance, 0.0001)).rounded())) "
+                + "at your discipline, or forced with a vial."
+            : ""
 
         var traits: [String] = []
         if !entry.types.isEmpty { traits.append("Type: \(entry.types.joined(separator: ", "))") }

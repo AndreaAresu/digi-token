@@ -294,16 +294,40 @@ The card shows what the shipped index already knows — stage, attribute, type,
 field, X-Antibody, and where the form digivolves to — plus a **rarity** read off
 the evolution graph rather than invented:
 
-| Label | Routes in | Share of roster |
-|---|---|---|
-| Off the graph | 0 | 116 |
-| Rare | 1–2 | 202 |
-| Uncommon | 3–6 | 279 |
-| Common | 7+ | 662 |
+| Label | Stars | Routes in | Share of roster |
+|---|---|---|---|
+| Off the graph | ◆ | 0 | 116 |
+| Rare | ★★★ | 1–2 | 202 |
+| Uncommon | ★★☆ | 3–6 | 279 |
+| Common | ★☆☆ | 7+ | 662 |
 
 The exact route count is always printed beside the label, so the claim can be
-checked. "Off the graph" means no recorded line digivolves into that form at all
-— you meet it through a fallback branch or a Jogress.
+checked. The stars are a second reading of that same count — they cannot say
+anything it does not, and a test pins that they never rise as it rises. They
+appear on the card and on met cells in the grid, never under a silhouette:
+printing them there would say which of the unmet forms are worth chasing, which
+is the one thing the three states exist to withhold.
+
+"Off the graph" means no recorded line digivolves into that form at all — you
+meet it through a fallback branch or a Jogress. It gets a diamond rather than a
+fourth star on purpose: it is a different claim, not a higher one.
+
+### The X-Antibody is not a rarity tier
+
+It looks like one, so it is worth stating what the data says. Measured across
+the shipped index, X forms are **easier** to route to than the roster at large:
+
+| | Median routes in | Share that are Common |
+|---|---|---|
+| X-Antibody forms (161) | 9 | 62% |
+| Whole roster (1,259) | 7 | 53% |
+
+The graph records the X variant as reachable from most of the lines its base
+form is, so on that axis it is unremarkable. What makes an X form hard to get is
+the **roll at the digivolution**: 1 in 128 at the floor, rising with discipline
+to about 1 in 50, or settled outright by a vial. That is a different axis from
+the graph, so the stars stay off it and the card prints the odds instead — your
+own odds, from your own care profile.
 
 The reference-book text, attacks and release year are fetched from digi-api the
 first time a card is opened and cached from then on. They are **not** in

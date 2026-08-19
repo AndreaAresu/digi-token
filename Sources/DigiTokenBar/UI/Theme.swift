@@ -190,6 +190,69 @@ final class HistogramView: NSView {
     }
 }
 
+/// Rarity as a row of stars, read straight off the evolution graph.
+///
+/// The stars are a second reading of a number the app already computes and
+/// already prints — how many recorded lines digivolve into a form — so they can
+/// never disagree with the figure beside them. A form nothing routes into gets a
+/// diamond rather than a fourth star: that is a different claim, not a higher
+/// one.
+@MainActor
+final class RarityStars: NSView {
+    private let row = UI.stack(.horizontal, spacing: 1, [])
+    private let size: CGFloat
+
+    init(size: CGFloat = 9) {
+        self.size = size
+        super.init(frame: .zero)
+        addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor),
+            row.topAnchor.constraint(equalTo: topAnchor),
+            row.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    func show(_ rarity: DigiRarity, routes: Int) {
+        row.arrangedSubviews.forEach {
+            row.removeArrangedSubview($0)
+            $0.removeFromSuperview()
+        }
+
+        let tint = Theme.rarity(rarity)
+        if let filled = rarity.stars {
+            for index in 0..<DigiRarity.starScale {
+                let on = index < filled
+                row.addArrangedSubview(pip(
+                    on ? "star.fill" : "star",
+                    // The empty half of the scale still has to be visible, or
+                    // one star and three stars look like the same row.
+                    tint: on ? tint : NSColor.quaternaryLabelColor
+                ))
+            }
+        } else {
+            row.addArrangedSubview(pip("diamond.fill", tint: tint))
+        }
+
+        toolTip = "\(rarity.label) · \(rarity.detail(routes: routes))"
+    }
+
+    private func pip(_ symbol: String, tint: NSColor) -> NSImageView {
+        let view = NSImageView()
+        view.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        view.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: size, weight: .semibold)
+        view.contentTintColor = tint
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.widthAnchor.constraint(equalToConstant: size + 2).isActive = true
+        view.heightAnchor.constraint(equalToConstant: size + 2).isActive = true
+        return view
+    }
+}
+
 /// Displays a Digimon, loading its artwork the first time it is shown.
 final class SpriteView: NSImageView {
     private var currentID: Int?
