@@ -29,6 +29,11 @@ enum Theme {
 
     static let popoverWidth: CGFloat = 340
     static let contentHeight: CGFloat = 392
+
+    /// The popover width less the 14-point margin every pane keeps on each side.
+    /// Wrapping text has to be told this, or it reports the width of its whole
+    /// string and drags the window out with it.
+    static let contentWidth: CGFloat = popoverWidth - 28
 }
 
 /// Small constructors so the layout code below reads as layout rather than as
@@ -56,6 +61,24 @@ enum UI {
         field.textColor = color
         field.alignment = align
         field.lineBreakMode = .byTruncatingTail
+        return field
+    }
+
+    /// Lets a label wrap instead of reporting the width of its whole string.
+    ///
+    /// An `NSTextField` with no `preferredMaxLayoutWidth` has an intrinsic width
+    /// of its text on a single line, however many lines it is allowed to use.
+    /// The panes chain equal-width constraints from every label up to the root
+    /// view, so that width becomes the popover's width: one sentence in the shop
+    /// was enough to open the window at 592 points instead of 340. Every
+    /// multi-line label goes through here.
+    @discardableResult
+    static func wraps(
+        _ field: NSTextField, lines: Int = 0, width: CGFloat = Theme.contentWidth
+    ) -> NSTextField {
+        field.maximumNumberOfLines = lines
+        field.lineBreakMode = .byWordWrapping
+        field.preferredMaxLayoutWidth = width
         return field
     }
 

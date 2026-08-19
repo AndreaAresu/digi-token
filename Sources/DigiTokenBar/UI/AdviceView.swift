@@ -9,25 +9,21 @@ import AppKit
 final class AdviceRow: NSView {
     /// Card insets plus the pane's own margins, so the wrapped text knows how
     /// wide it is allowed to be before Auto Layout has measured anything.
-    static let textWidth = Theme.popoverWidth - 28 - 16
+    static let textWidth = Theme.contentWidth - 16
 
     init(_ advice: Advice) {
         super.init(frame: .zero)
 
-        let title = UI.label(advice.title, size: 11, weight: .semibold)
-        title.maximumNumberOfLines = 2
-        title.lineBreakMode = .byWordWrapping
-        title.preferredMaxLayoutWidth = Self.textWidth
-
-        let evidence = UI.label(advice.evidence, size: 9, color: Theme.accent, mono: true)
-        evidence.maximumNumberOfLines = 3
-        evidence.lineBreakMode = .byWordWrapping
-        evidence.preferredMaxLayoutWidth = Self.textWidth
-
-        let detail = UI.label(advice.detail, size: 10, color: .secondaryLabelColor)
-        detail.maximumNumberOfLines = 0
-        detail.lineBreakMode = .byWordWrapping
-        detail.preferredMaxLayoutWidth = Self.textWidth
+        let title = UI.wraps(
+            UI.label(advice.title, size: 11, weight: .semibold), lines: 2, width: Self.textWidth
+        )
+        let evidence = UI.wraps(
+            UI.label(advice.evidence, size: 9, color: Theme.accent, mono: true),
+            lines: 3, width: Self.textWidth
+        )
+        let detail = UI.wraps(
+            UI.label(advice.detail, size: 10, color: .secondaryLabelColor), width: Self.textWidth
+        )
 
         let stack = UI.stack(.vertical, spacing: 4, [title, evidence, detail])
         let card = UI.card(stack)
@@ -61,12 +57,8 @@ final class CoachSection: NSView {
     init() {
         super.init(frame: .zero)
 
-        verdict.maximumNumberOfLines = 2
-        verdict.lineBreakMode = .byWordWrapping
-        verdict.preferredMaxLayoutWidth = AdviceRow.textWidth
-        summary.maximumNumberOfLines = 2
-        summary.lineBreakMode = .byWordWrapping
-        summary.preferredMaxLayoutWidth = AdviceRow.textWidth
+        UI.wraps(verdict, lines: 2, width: AdviceRow.textWidth)
+        UI.wraps(summary, lines: 2, width: AdviceRow.textWidth)
 
         let head = UI.stack(.vertical, spacing: 3, [verdict, summary])
         let stack = UI.stack(.vertical, spacing: 8, [
