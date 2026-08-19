@@ -498,9 +498,17 @@ enum SelfTest {
         }
 
         func alpha(atFraction x: Double, _ y: Double) -> Int {
+            Int(rgba(atFraction: x, y).3)
+        }
+
+        func rgba(atFraction x: Double, _ y: Double) -> (Int, Int, Int, Int) {
             let px = min(width - 1, max(0, Int(Double(width) * x)))
             let py = min(height - 1, max(0, Int(Double(height) * y)))
-            return Int(buffer[(py * width + px) * 4 + 3])
+            let index = (py * width + px) * 4
+            return (
+                Int(buffer[index]), Int(buffer[index + 1]),
+                Int(buffer[index + 2]), Int(buffer[index + 3])
+            )
         }
     }
 
@@ -953,6 +961,26 @@ enum SelfTest {
             "a tamer already using cheaper models is left alone"
         )
 
+        // Two tools, two habits. The coach is scoped to one tool at a time
+        // because a report over the union describes neither: here the cache
+        // reads from the tool that is used well swamp the one that is not, and
+        // the advice that should fire disappears. It was appearing under the
+        // wrong tab before, which is the same bug seen from the other side.
+        let secondTool = (0..<12).map {
+            event(
+                model: "claude-opus-5", session: "x\($0)", key: "x\($0)",
+                input: 900_000, output: 100_000, write: 50_000, read: 100_000
+            )
+        }
+        expect(
+            fired(Coach.report(events: secondTool), "cache-reuse"),
+            "a tool used wastefully is flagged on its own events"
+        )
+        expect(
+            !fired(Coach.report(events: healthy + secondTool), "cache-reuse"),
+            "pooling both tools hides it — which is why the pane reports per tool"
+        )
+
         // Forked transcripts repeat the same turn; counting them would inflate
         // every share the coach reports.
         let doubled = healthy + healthy
@@ -1294,6 +1322,21 @@ enum SelfTest {
             expect(
                 a.alpha(atFraction: 0.5, 0.5) > 200 && b.alpha(atFraction: 0.5, 0.5) > 200,
                 "the filled centre stays filled"
+            )
+            // The point of a silhouette is that it withholds everything except
+            // the shape. A translucent fill left more than half the artwork
+            // showing through, so the whole roster of "one step away" forms was
+            // legible in colour on the DigiDex — which is the spoiler the three
+            // states exist to avoid.
+            let (red, green, blue, _) = b.rgba(atFraction: 0.5, 0.5)
+            expect(
+                abs(red - green) < 6 && abs(green - blue) < 6,
+                "the silhouette keeps no colour from the artwork (\(red),\(green),\(blue))"
+            )
+            let original = a.rgba(atFraction: 0.5, 0.5)
+            expect(
+                abs(red - original.0) > 40,
+                "the silhouette does not read as the original (\(red) vs \(original.0))"
             )
         } else {
             expect(false, "the flattened sprite is readable")

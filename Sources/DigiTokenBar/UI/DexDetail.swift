@@ -38,14 +38,11 @@ final class DexDetailView: NSView {
         close.contentTintColor = .secondaryLabelColor
         close.toolTip = "Back to the DigiDex"
 
+        let cardWidth = Theme.popoverWidth - 32
         for label in [summaryLabel, skillsLabel, traitsLabel, rarityDetail, routesLabel] {
-            label.maximumNumberOfLines = 0
-            label.lineBreakMode = .byWordWrapping
-            label.preferredMaxLayoutWidth = Theme.popoverWidth - 32
+            UI.wraps(label, width: cardWidth)
         }
-        nameLabel.maximumNumberOfLines = 2
-        nameLabel.lineBreakMode = .byWordWrapping
-        nameLabel.preferredMaxLayoutWidth = Theme.popoverWidth - 32
+        UI.wraps(nameLabel, lines: 2, width: cardWidth)
 
         let rarityRow = UI.stack(.horizontal, spacing: 6, [rarityLabel, xBadge, UI.spacer()])
         let heading = UI.stack(.vertical, spacing: 2, [

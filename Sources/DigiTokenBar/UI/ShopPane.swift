@@ -30,11 +30,8 @@ final class ShopPane: NSView {
         ]))
         walletCard.translatesAutoresizingMaskIntoConstraints = false
 
-        effectsLabel.maximumNumberOfLines = 4
-        effectsLabel.lineBreakMode = .byWordWrapping
-
-        ruleLabel.maximumNumberOfLines = 4
-        ruleLabel.lineBreakMode = .byWordWrapping
+        UI.wraps(effectsLabel, lines: 4)
+        UI.wraps(ruleLabel, lines: 4)
         ruleLabel.stringValue =
             "Everything here is bought before the outcome is known. Nothing clears a care mistake or skips a stage — your record stays true."
 
@@ -136,8 +133,9 @@ final class ShopRow: NSView {
         price.setContentHuggingPriority(.required, for: .horizontal)
 
         let blurb = UI.label(item.blurb, size: 9, color: .secondaryLabelColor)
-        blurb.maximumNumberOfLines = 3
-        blurb.lineBreakMode = .byWordWrapping
+        // The row also carries an icon, a price and a 74-point button, so the
+        // text has less room than a full-width paragraph.
+        UI.wraps(blurb, lines: 3, width: Theme.contentWidth - 110)
 
         let button: NSButton
         if item.needsField {
