@@ -22,10 +22,36 @@ SOFTWARE.
 
 ---
 
-This license covers the source code in this repository only.
+SCOPE
 
-Digimon is a trademark of Bandai. This project is an unofficial, non-commercial
-fan work with no affiliation with or endorsement by any rights holder. No
-Digimon names, data, or artwork are covered by this license, and none are
-redistributed with the software — Digimon artwork is fetched from digi-api.com
-at runtime and cached on the end user's own machine.
+The MIT licence above covers the SOURCE CODE in this repository only:
+Sources/, Tests/, scripts/ and tools/.
+
+BUNDLED DIGIMON DATA
+
+Sources/DigiTokenBar/Resources/digidex.json is NOT covered by the MIT licence.
+It is derived from digi-api.com (https://digi-api.com), which publishes under
+Creative Commons Attribution-ShareAlike 3.0 Unported (CC BY-SA 3.0) and draws
+mainly on Wikimon (https://wikimon.net).
+
+That file, and any work derived from it, is licensed under CC BY-SA 3.0:
+https://creativecommons.org/licenses/by-sa/3.0/
+
+Changes made to the source data: filtered to the six main evolution stages;
+reduced to the fields this application uses; evolution edges pointing outside
+the retained set removed; compacted into a single JSON index. The
+transformation is performed by tools/build_index.py.
+
+ARTWORK
+
+Digimon artwork is covered by neither licence and is NOT redistributed with
+this software. The CC BY-SA licence applies to digi-api's database, not to
+Bandai's images. The application fetches images at runtime and caches them on
+the end user's own machine.
+
+TRADEMARKS
+
+Digimon and Digital Monsters are trademarks of Bandai. This project is an
+unofficial, non-commercial fan work with no affiliation with, sponsorship by,
+or endorsement from any rights holder. No trademark rights are granted by the
+MIT licence above.

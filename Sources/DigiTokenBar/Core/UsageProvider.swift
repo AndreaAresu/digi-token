@@ -25,20 +25,54 @@ struct UsageArchive: Sendable, Codable {
     /// Start-of-day stamps, which is all the streak calculation needs.
     var days: Set<Date> = []
     var sessions: Set<String> = []
+    /// Per-project totals, so the breakdown still spans aged-out history.
+    var projects: [String: TokenCounts] = [:]
+
+    init() {}
+
+    init(
+        counts: TokenCounts, eventCount: Int, days: Set<Date>,
+        sessions: Set<String>, projects: [String: TokenCounts]
+    ) {
+        self.counts = counts
+        self.eventCount = eventCount
+        self.days = days
+        self.sessions = sessions
+        self.projects = projects
+    }
+
+    /// Decoded leniently so that adding a field does not invalidate every cache
+    /// written by an earlier version and force a full rescan.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        counts = try container.decodeIfPresent(TokenCounts.self, forKey: .counts) ?? TokenCounts()
+        eventCount = try container.decodeIfPresent(Int.self, forKey: .eventCount) ?? 0
+        days = try container.decodeIfPresent(Set<Date>.self, forKey: .days) ?? []
+        sessions = try container.decodeIfPresent(Set<String>.self, forKey: .sessions) ?? []
+        projects = try container.decodeIfPresent([String: TokenCounts].self, forKey: .projects) ?? [:]
+    }
 
     mutating func absorb(_ event: UsageEvent, calendar: Calendar) {
         counts += event.counts
         eventCount += 1
         days.insert(calendar.startOfDay(for: event.timestamp))
         sessions.insert(event.sessionID)
+        if let project = event.project {
+            projects[project, default: TokenCounts()] += event.counts
+        }
     }
 
     static func + (lhs: UsageArchive, rhs: UsageArchive) -> UsageArchive {
-        UsageArchive(
+        var merged = lhs.projects
+        for (name, counts) in rhs.projects {
+            merged[name, default: TokenCounts()] += counts
+        }
+        return UsageArchive(
             counts: lhs.counts + rhs.counts,
             eventCount: lhs.eventCount + rhs.eventCount,
             days: lhs.days.union(rhs.days),
-            sessions: lhs.sessions.union(rhs.sessions)
+            sessions: lhs.sessions.union(rhs.sessions),
+            projects: merged
         )
     }
 }
@@ -61,6 +95,25 @@ final class ScanCache: @unchecked Sendable {
         var size: Int64
         var modified: Date
         var archive = UsageArchive()
+        /// The working directory this log belongs to. Codex writes it in a
+        /// header line, which an incremental resume skips past, so it has to be
+        /// remembered rather than re-read.
+        var project: String?
+
+        init(offset: UInt64, size: Int64, modified: Date) {
+            self.offset = offset
+            self.size = size
+            self.modified = modified
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            offset = try container.decode(UInt64.self, forKey: .offset)
+            size = try container.decode(Int64.self, forKey: .size)
+            modified = try container.decode(Date.self, forKey: .modified)
+            archive = try container.decodeIfPresent(UsageArchive.self, forKey: .archive) ?? UsageArchive()
+            project = try container.decodeIfPresent(String.self, forKey: .project)
+        }
     }
 
     private struct StoredEvent: Codable {
@@ -126,6 +179,19 @@ final class ScanCache: @unchecked Sendable {
             return 0
         }
         return state.offset
+    }
+
+    /// The project a log file belongs to, learned on a previous pass.
+    func projectHint(for path: String) -> String? {
+        lock.lock(); defer { lock.unlock() }
+        return files[path]?.project
+    }
+
+    func setProjectHint(_ project: String, for path: String) {
+        lock.lock(); defer { lock.unlock() }
+        var state = files[path] ?? FileState(offset: 0, size: 0, modified: Date())
+        state.project = project
+        files[path] = state
     }
 
     /// Retained events already known for `path` from earlier scans.

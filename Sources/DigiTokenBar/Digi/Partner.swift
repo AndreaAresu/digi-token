@@ -37,39 +37,75 @@ struct Partner: Codable, Sendable, Identifiable, Hashable {
     var ageInDays: Int { Int(age / 86400) }
 }
 
-/// Token cost of each rung.
+/// How fast the ladder should be walked.
 ///
-/// Tuned so a heavy daily user reaches Ultimate in roughly two months and a
-/// casual one still sees a digivolution in the first week — the curve has to
-/// reward showing up more than it rewards burning tokens, or the app becomes an
-/// argument for wasting money.
-enum GrowthCurve {
-    static let eggHatch = 20_000
+/// Token spend varies by an order of magnitude between plans and working styles,
+/// so a single fixed curve is either unreachable for a light user or trivial for
+/// a heavy one. The pace is a multiplier on every threshold, and the tamer picks
+/// the one that matches how much they actually use their agent.
+enum GrowthPace: String, Codable, Sendable, CaseIterable {
+    /// A modest plan, or an agent used a few days a week.
+    case quick
+    /// The default. Roughly a month to Mega at a steady daily habit.
+    case standard
+    /// Heavy daily use, where the standard curve would be over in a week.
+    case marathon
 
-    static func requirement(for stage: DigiStage) -> Int {
-        switch stage {
-        case .babyI: 0
-        case .babyII: 120_000
-        case .child: 600_000
-        case .adult: 3_000_000
-        case .perfect: 12_000_000
-        case .ultimate: 40_000_000
+    var multiplier: Double {
+        switch self {
+        case .quick: 0.5
+        case .standard: 1
+        case .marathon: 3
         }
     }
 
+    var label: String {
+        switch self {
+        case .quick: "Light use"
+        case .standard: "Regular use"
+        case .marathon: "Heavy use"
+        }
+    }
+}
+
+/// Token cost of each rung.
+///
+/// Growth runs on *billable* tokens, so the curve never rewards re-sending
+/// context you could have cached. The numbers below are set so that reaching
+/// Mega is the *start* of the game — the collection and Jogress are the long
+/// haul — rather than a months-long grind that most tamers never finish.
+enum GrowthCurve {
+    static let eggHatch = 20_000
+
+    /// Baseline thresholds at `GrowthPace.standard`.
+    private static func baseRequirement(for stage: DigiStage) -> Int {
+        switch stage {
+        case .babyI: 0
+        case .babyII: 75_000
+        case .child: 300_000
+        case .adult: 1_000_000
+        case .perfect: 3_000_000
+        case .ultimate: 8_000_000
+        }
+    }
+
+    static func requirement(for stage: DigiStage, pace: GrowthPace = .standard) -> Int {
+        Int((Double(baseRequirement(for: stage)) * pace.multiplier).rounded())
+    }
+
     /// Progress through the current rung, 0...1.
-    static func progress(tokens: Int, stage: DigiStage) -> Double {
+    static func progress(tokens: Int, stage: DigiStage, pace: GrowthPace = .standard) -> Double {
         guard let next = stage.next else { return 1 }
-        let floorValue = requirement(for: stage)
-        let ceilingValue = requirement(for: next)
+        let floorValue = requirement(for: stage, pace: pace)
+        let ceilingValue = requirement(for: next, pace: pace)
         guard ceilingValue > floorValue else { return 1 }
         let span = Double(ceilingValue - floorValue)
         return min(1, max(0, Double(tokens - floorValue) / span))
     }
 
-    static func tokensToNext(tokens: Int, stage: DigiStage) -> Int? {
+    static func tokensToNext(tokens: Int, stage: DigiStage, pace: GrowthPace = .standard) -> Int? {
         guard let next = stage.next else { return nil }
-        return max(0, requirement(for: next) - tokens)
+        return max(0, requirement(for: next, pace: pace) - tokens)
     }
 }
 

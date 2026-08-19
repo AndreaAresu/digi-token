@@ -60,6 +60,12 @@ enum SelfTest {
         section("Sprite processing")
         testSpriteProcessing()
 
+        section("Project breakdown")
+        testProjectBreakdown()
+
+        section("Growth pace")
+        testGrowthPace()
+
         section("Real logs on this machine")
         await testRealLogs()
 
@@ -457,6 +463,97 @@ enum SelfTest {
         }
     }
 
+    static func testProjectBreakdown() {
+        func event(_ project: String?, _ tokens: Int, hoursAgo: Double, key: String) -> UsageEvent {
+            UsageEvent(
+                timestamp: Date().addingTimeInterval(-hoursAgo * 3600),
+                model: "claude-sonnet-5",
+                counts: TokenCounts(input: tokens, output: 0, cacheCreation: 0, cacheRead: 0),
+                dedupKey: key, sessionID: "s", project: project
+            )
+        }
+
+        let events = [
+            event("alpha", 500, hoursAgo: 1, key: "a"),
+            event("alpha", 300, hoursAgo: 2, key: "b"),
+            event("beta", 900, hoursAgo: 3, key: "c"),
+            // No project recorded; must not create a phantom row.
+            event(nil, 100, hoursAgo: 4, key: "d"),
+        ]
+        let usage = UsageAggregator.summarize(provider: .claudeCode, events: events)
+
+        expect(usage.projects.count == 2, "only projects with a recorded directory appear")
+        expect(usage.projects.first?.name == "beta", "biggest consumer sorts first")
+        expect(usage.projects.first?.counts.billable == 900, "per-project totals add up")
+        expect(
+            usage.projects.first(where: { $0.name == "alpha" })?.counts.billable == 800,
+            "events for the same project are combined"
+        )
+        expect(
+            usage.allTime.billable == 1_800,
+            "the untracked event still counts toward the total"
+        )
+
+        // The breakdown has to survive the cache ageing events out.
+        var archive = UsageArchive()
+        archive.absorb(event("alpha", 4_000, hoursAgo: 5_000, key: "old"), calendar: .current)
+        let spanning = UsageAggregator.summarize(
+            provider: .claudeCode, events: events, archive: archive
+        )
+        expect(
+            spanning.projects.first?.name == "alpha",
+            "archived project totals are folded back in"
+        )
+        expect(
+            spanning.projects.first?.counts.billable == 4_800,
+            "archived and retained totals combine per project"
+        )
+
+        // Codex names its directory in separate header records.
+        let meta = #"{"type":"session_meta","payload":{"cwd":"/Users/x/dev/red-flag"}}"#
+        expect(
+            CodexProvider.workingDirectory(in: Data(meta.utf8)) == "/Users/x/dev/red-flag",
+            "codex: session_meta yields the working directory"
+        )
+        let turn = #"{"type":"turn_context","cwd":"/Users/x/dev/other"}"#
+        expect(
+            CodexProvider.workingDirectory(in: Data(turn.utf8)) == "/Users/x/dev/other",
+            "codex: an unnested turn_context also yields it"
+        )
+        let usageLine = #"{"type":"event_msg","payload":{"type":"token_count"}}"#
+        expect(
+            CodexProvider.workingDirectory(in: Data(usageLine.utf8)) == nil,
+            "codex: usage records carry no directory"
+        )
+    }
+
+    static func testGrowthPace() {
+        let quick = GrowthCurve.requirement(for: .ultimate, pace: .quick)
+        let standard = GrowthCurve.requirement(for: .ultimate, pace: .standard)
+        let marathon = GrowthCurve.requirement(for: .ultimate, pace: .marathon)
+
+        expect(quick < standard && standard < marathon, "the paces are ordered")
+        expect(standard == 8_000_000, "Mega sits at 8M billable on the default pace")
+        expect(quick == 4_000_000, "light use halves it")
+
+        // Every rung must still be strictly increasing at every pace, or the
+        // ladder could grant two stages for the same token.
+        for pace in GrowthPace.allCases {
+            var previous = -1
+            var monotonic = true
+            for stage in DigiStage.allCases {
+                let value = GrowthCurve.requirement(for: stage, pace: pace)
+                if value <= previous && stage != .babyI { monotonic = false }
+                previous = value
+            }
+            expect(monotonic, "\(pace.label): thresholds increase at every rung")
+        }
+
+        // Progress has to stay inside 0...1 whatever the pace.
+        let progress = GrowthCurve.progress(tokens: 500_000, stage: .child, pace: .marathon)
+        expect((0...1).contains(progress), "progress stays bounded (\(progress))")
+    }
+
     static func testRealLogs() async {
         var found = false
 
@@ -489,7 +586,17 @@ enum SelfTest {
                   \(usage.sessionCount) sessions, \(usage.activeDays.count) active days \
                   (\(String(format: "%.2f", elapsed))s)
                   """)
+            if !usage.projects.isEmpty {
+                let top = usage.projects.prefix(5).map {
+                    "\($0.name) \(TokenFormatter.short($0.counts.billable))"
+                }
+                print("    top projects: \(top.joined(separator: ", "))")
+            }
             expect(usage.allTime.billable > 0, "\(provider.id.displayName): billable tokens found")
+            expect(
+                !usage.projects.isEmpty,
+                "\(provider.id.displayName): the breakdown found projects (\(usage.projects.count))"
+            )
             expect(
                 usage.allTime.total >= usage.allTime.billable,
                 "\(provider.id.displayName): totals are consistent"

@@ -75,11 +75,26 @@ enum UsageAggregator {
 
         var days = archive.days
         var sessions = archive.sessions
+        var projectTotals = archive.projects
+        var projectToday: [String: TokenCounts] = [:]
+        var projectSeen: [String: Date] = [:]
 
         for event in events {
             usage.allTime += event.counts
             days.insert(calendar.startOfDay(for: event.timestamp))
             sessions.insert(event.sessionID)
+
+            if let project = event.project {
+                projectTotals[project, default: TokenCounts()] += event.counts
+                if event.timestamp >= startOfToday {
+                    projectToday[project, default: TokenCounts()] += event.counts
+                }
+                if let seen = projectSeen[project] {
+                    projectSeen[project] = max(seen, event.timestamp)
+                } else {
+                    projectSeen[project] = event.timestamp
+                }
+            }
 
             if event.timestamp >= startOfToday {
                 usage.today += event.counts
@@ -95,6 +110,16 @@ enum UsageAggregator {
         usage.sessionCount = sessions.count
         usage.activeDays = days.sorted(by: >)
         usage.lastActivity = events.map(\.timestamp).max()
+        usage.projects = projectTotals
+            .map { name, counts in
+                ProjectUsage(
+                    name: name,
+                    counts: counts,
+                    today: projectToday[name] ?? TokenCounts(),
+                    lastActivity: projectSeen[name]
+                )
+            }
+            .sorted { $0.counts.billable > $1.counts.billable }
 
         let allBlocks = blocks(from: events, calendar: calendar)
         usage.currentBlock = allBlocks.last.flatMap { $0.isActive ? $0 : nil }

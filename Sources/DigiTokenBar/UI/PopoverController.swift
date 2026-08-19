@@ -199,6 +199,21 @@ final class PopoverController: NSViewController {
         menu.addItem(toggle("Launch at login", #selector(toggleLogin), settings.launchesAtLogin))
 
         menu.addItem(.separator())
+        let paceHeader = NSMenuItem(title: "Growth pace", action: nil, keyEquivalent: "")
+        paceHeader.isEnabled = false
+        menu.addItem(paceHeader)
+        for pace in GrowthPace.allCases {
+            let item = NSMenuItem(
+                title: "  \(pace.label)", action: #selector(pickPace(_:)), keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = pace.rawValue
+            item.state = settings.growthPace == pace ? .on : .off
+            item.toolTip = "Mega at \(TokenFormatter.short(GrowthCurve.requirement(for: .ultimate, pace: pace))) billable tokens"
+            menu.addItem(item)
+        }
+
+        menu.addItem(.separator())
         let refresh = NSMenuItem(title: "Refresh every", action: nil, keyEquivalent: "")
         refresh.isEnabled = false
         menu.addItem(refresh)
@@ -212,7 +227,38 @@ final class PopoverController: NSViewController {
             menu.addItem(item)
         }
 
+        menu.addItem(.separator())
+        let about = NSMenuItem(
+            title: "About & credits", action: #selector(showAbout), keyEquivalent: ""
+        )
+        about.target = self
+        menu.addItem(about)
+
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 4), in: sender)
+    }
+
+    /// CC BY-SA requires attribution to travel with the work, so it has to be
+    /// reachable from inside the app and not only from the repository README.
+    @objc private func showAbout() {
+        let alert = NSAlert()
+        alert.messageText = "DigiTokenBar"
+        alert.informativeText = """
+            An unofficial, non-commercial fan project. Not affiliated with, \
+            sponsored by, or endorsed by Bandai, Bandai Namco, or Toei Animation. \
+            Digimon and Digital Monsters are trademarks of Bandai.
+
+            Digimon data from digi-api.com, drawing on Wikimon, used under \
+            CC BY-SA 3.0 and modified for this app. Artwork is fetched at runtime \
+            and cached on your machine; none is redistributed with the app.
+
+            Application code is MIT licensed.
+            """
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Open digi-api.com")
+        if alert.runModal() == .alertSecondButtonReturn,
+           let url = URL(string: "https://digi-api.com") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     private func toggle(_ title: String, _ action: Selector, _ on: Bool) -> NSMenuItem {
@@ -256,6 +302,17 @@ final class PopoverController: NSViewController {
     @objc private func pickRefresh(_ sender: NSMenuItem) {
         guard let minutes = sender.representedObject as? Int else { return }
         Settings.shared.refreshMinutes = minutes
+    }
+
+    @objc private func pickPace(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let pace = GrowthPace(rawValue: raw)
+        else { return }
+        Settings.shared.growthPace = pace
+        // Thresholds just moved under the current partner, so it may have earned
+        // rungs it had not a moment ago.
+        store.reevaluate()
+        refresh()
     }
 }
 
