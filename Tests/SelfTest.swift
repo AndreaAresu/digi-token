@@ -498,9 +498,17 @@ enum SelfTest {
         }
 
         func alpha(atFraction x: Double, _ y: Double) -> Int {
+            Int(rgba(atFraction: x, y).3)
+        }
+
+        func rgba(atFraction x: Double, _ y: Double) -> (Int, Int, Int, Int) {
             let px = min(width - 1, max(0, Int(Double(width) * x)))
             let py = min(height - 1, max(0, Int(Double(height) * y)))
-            return Int(buffer[(py * width + px) * 4 + 3])
+            let index = (py * width + px) * 4
+            return (
+                Int(buffer[index]), Int(buffer[index + 1]),
+                Int(buffer[index + 2]), Int(buffer[index + 3])
+            )
         }
     }
 
@@ -1209,6 +1217,21 @@ enum SelfTest {
             expect(
                 a.alpha(atFraction: 0.5, 0.5) > 200 && b.alpha(atFraction: 0.5, 0.5) > 200,
                 "the filled centre stays filled"
+            )
+            // The point of a silhouette is that it withholds everything except
+            // the shape. A translucent fill left more than half the artwork
+            // showing through, so the whole roster of "one step away" forms was
+            // legible in colour on the DigiDex — which is the spoiler the three
+            // states exist to avoid.
+            let (red, green, blue, _) = b.rgba(atFraction: 0.5, 0.5)
+            expect(
+                abs(red - green) < 6 && abs(green - blue) < 6,
+                "the silhouette keeps no colour from the artwork (\(red),\(green),\(blue))"
+            )
+            let original = a.rgba(atFraction: 0.5, 0.5)
+            expect(
+                abs(red - original.0) > 40,
+                "the silhouette does not read as the original (\(red) vs \(original.0))"
             )
         } else {
             expect(false, "the flattened sprite is readable")

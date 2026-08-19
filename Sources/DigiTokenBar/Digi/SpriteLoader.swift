@@ -13,6 +13,7 @@ actor SpriteLoader {
     static let shared = SpriteLoader()
 
     private var memory: [Int: NSImage] = [:]
+    private var silhouettes: [Int: NSImage] = [:]
     private var inFlight: [Int: Task<NSImage?, Never>] = [:]
 
     /// Bumped when the processing changes, so cached images from an older
@@ -111,27 +112,40 @@ actor SpriteLoader {
         }
     }
 
-    /// The same artwork, flattened to a single colour.
+    /// The grey a silhouette is painted in.
+    ///
+    /// Fixed rather than taken from the system palette, and opaque rather than
+    /// tinted. `labelColor` is white in the dark appearance, so a translucent
+    /// wash of it lightened the artwork instead of hiding it — and whatever the
+    /// colour, anything short of full opacity leaves the original showing
+    /// through. This grey reads on both the dark cell and a light one.
+    static let silhouetteInk = NSColor(calibratedWhite: 0.46, alpha: 1)
+
+    /// The same artwork, reduced to its shape.
     ///
     /// Used for forms the tamer has not met but could reach next. It is drawn
     /// from the real sprite because a silhouette has to have the right shape to
-    /// be worth showing — that is the whole tease — but it deliberately gives
-    /// away nothing else.
+    /// be worth showing — that is the whole tease — but it gives away nothing
+    /// else: not the colours, not the markings, not which of two similar forms
+    /// it is.
     func silhouette(for entry: DigimonEntry) async -> NSImage? {
+        if let cached = silhouettes[entry.id] { return cached }
         guard let image = await self.image(for: entry) else { return nil }
-        return Self.flatten(image)
+        let flat = Self.flatten(image)
+        silhouettes[entry.id] = flat
+        return flat
     }
 
-    static func flatten(_ image: NSImage, color: NSColor = .labelColor) -> NSImage {
+    static func flatten(_ image: NSImage, color: NSColor = silhouetteInk) -> NSImage {
         let output = NSImage(size: image.size)
         output.lockFocus()
         image.draw(
             in: NSRect(origin: .zero, size: image.size),
             from: .zero, operation: .sourceOver, fraction: 1
         )
-        color.withAlphaComponent(0.42).set()
+        color.set()
         // sourceAtop keeps the alpha and replaces only the colour, so the shape
-        // survives and the detail does not.
+        // survives — including its soft edges — and nothing of the artwork does.
         NSRect(origin: .zero, size: image.size).fill(using: .sourceAtop)
         output.unlockFocus()
         return output
