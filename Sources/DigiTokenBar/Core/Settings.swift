@@ -18,6 +18,18 @@ final class Settings {
         static let notifications = "notificationsEnabled"
         static let refreshMinutes = "refreshMinutes"
         static let growthPace = "growthPace"
+        static let tamerName = "tamerName"
+    }
+
+    /// The name that goes on a shared Tamer Card. Empty until the tamer sets
+    /// one, and never derived from the account or the machine — the card is the
+    /// one thing here that leaves the Mac, so what it says about its owner is
+    /// typed by hand or not present at all.
+    var tamerName: String {
+        didSet {
+            tamerName = String(tamerName.trimmingCharacters(in: .whitespacesAndNewlines).prefix(24))
+            write(tamerName, Key.tamerName)
+        }
     }
 
     /// How fast the ladder advances. Changing it re-evaluates the current
@@ -82,6 +94,7 @@ final class Settings {
         notificationsEnabled = defaults.bool(forKey: Key.notifications)
         petSize = defaults.double(forKey: Key.petSize)
         refreshMinutes = defaults.integer(forKey: Key.refreshMinutes)
+        tamerName = defaults.string(forKey: Key.tamerName) ?? ""
     }
 
     private func write(_ value: Any, _ key: String) {

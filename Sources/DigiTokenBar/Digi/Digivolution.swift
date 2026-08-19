@@ -180,7 +180,11 @@ enum Digivolution {
         // already at the top fuses into another Ultimate rather than failing.
         let target = stage.next ?? .ultimate
 
-        let shared = Set(left.next).intersection(Set(right.next))
+        // Sorted, not merely collected: Swift seeds its hasher per process, so
+        // iterating the intersection directly hands back a different order on
+        // every launch — and with it a different fusion for the same pair. That
+        // is precisely the reroll the rest of this file is built to prevent.
+        let shared = Set(left.next).intersection(Set(right.next)).sorted()
         var pool = shared.compactMap { DigiDex.shared.entry($0) }.filter { $0.stageLabel == target }
 
         // Recorded fusions are rare in the reference data, so the same graceful

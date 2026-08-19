@@ -75,6 +75,9 @@ enum SelfTest {
         section("Coach")
         testCoach()
 
+        section("Tamer cards")
+        await testTamerCards()
+
         section("Real logs on this machine")
         await testRealLogs()
 
@@ -875,6 +878,195 @@ enum SelfTest {
             all.allSatisfy { !$0.evidence.isEmpty && !$0.title.isEmpty && !$0.detail.isEmpty },
             "no advice ships without its evidence"
         )
+    }
+
+    /// The card is the only thing in this app that ever leaves the machine, so
+    /// what it carries and what it refuses are both worth pinning.
+    @MainActor
+    static func testTamerCards() async {
+        func card(
+            tamer: String, seed: UInt64, id: Int, stage: DigiStage = .ultimate
+        ) -> TamerCard {
+            TamerCard(
+                tamer: tamer, seed: seed, digimonID: id, stage: stage,
+                isXAntibody: false, lineage: [id], nickname: nil, tokens: 8_000_000,
+                attribute: .vaccine, streak: 12, careMistakes: 0,
+                dexSeen: 40, dexTotal: DigiDex.shared.all.count
+            )
+        }
+
+        guard let sample = DigiDex.shared.entries(stage: .ultimate).first else {
+            expect(false, "the dex has an Ultimate to build a card from")
+            return
+        }
+        let mine = card(tamer: "Ada", seed: 12_345, id: sample.id)
+        let code = TamerCardCodec.encode(mine)
+
+        expect(code.hasPrefix("\(TamerCardCodec.prefix)."), "a card is recognisable on sight")
+        expect(code.count < 700, "a card fits in a chat message (\(code.count) chars)")
+
+        let round = try? TamerCardCodec.decode(code)
+        expect(round?.seed == mine.seed, "the seed survives the round trip")
+        expect(round?.digimonID == mine.digimonID, "the partner survives the round trip")
+        expect(round?.tamer == "Ada", "the tamer name survives the round trip")
+        expect(round?.stage == mine.stage, "the stage survives the round trip")
+
+        // Chat clients wrap long strings. A card that only works when pasted
+        // perfectly is a card that mostly does not work.
+        let wrapped = code.prefix(40) + "\n  " + code.dropFirst(40)
+        expect(
+            (try? TamerCardCodec.decode(String(wrapped)))?.seed == mine.seed,
+            "a card survives being wrapped across lines"
+        )
+
+        // The failure that matters: a truncated card must not decode into some
+        // other partner. It has to be refused.
+        let truncated = String(code.dropLast(12))
+        var damaged = false
+        do { _ = try TamerCardCodec.decode(truncated) } catch { damaged = true }
+        expect(damaged, "a truncated card is refused rather than misread")
+
+        var notACard = false
+        do { _ = try TamerCardCodec.decode("hello there") } catch { notACard = true }
+        expect(notACard, "arbitrary clipboard text is not a card")
+
+        // A friend on a newer build must not hand over something unreadable, so
+        // everything past the fields a fusion needs is optional.
+        let sparse = #"{"seed":999,"digimonID":\#(sample.id)}"#
+        let lenient = try? JSONDecoder().decode(TamerCard.self, from: Data(sparse.utf8))
+        expect(lenient?.seed == 999, "a card missing every optional field still decodes")
+        expect(lenient?.tamer == "Tamer", "a nameless card gets a neutral name")
+
+        // What the card does *not* carry is the point of the format.
+        guard let payload = code.split(separator: ".").dropFirst().first,
+              let json = decodeBase64url(String(payload)),
+              let object = try? JSONSerialization.jsonObject(with: json) as? [String: Any]
+        else {
+            expect(false, "the card payload is readable JSON")
+            return
+        }
+        let allowed: Set<String> = [
+            "version", "tamer", "issuedAt", "seed", "digimonID", "stage",
+            "isXAntibody", "lineage", "nickname", "tokens", "attribute",
+            "streak", "careMistakes", "dexSeen", "dexTotal",
+        ]
+        let extra = Set(object.keys).subtracting(allowed)
+        expect(extra.isEmpty, "the card carries nothing beyond the partner (\(extra.sorted()))")
+
+        // MARK: Jogress across two tamers
+
+        // Built by writing a save and loading it, so the collection arrives
+        // through the same decode path a real one does rather than through a
+        // hatch put there for the test's convenience.
+        var graduated = Partner(seed: 555)
+        graduated.digimonID = sample.id
+        graduated.stage = .ultimate
+        graduated.lineage = [sample.id]
+        graduated.retiredAt = Date()
+
+        func makeStore(collection: [Partner]) -> PartnerStore? {
+            let url = URL(
+                fileURLWithPath: NSTemporaryDirectory() + "digitest-cards-\(UUID()).json"
+            )
+            var seed = Partner(seed: 4_242)
+            seed.digimonID = sample.id
+            seed.stage = .adult
+            let file = PartnerStore.SaveFile(
+                partner: seed, collection: collection, seenDigimon: [sample.id],
+                seenXAntibody: [], baseline: 0, hasBaseline: true
+            )
+            guard let data = try? JSONEncoder().encode(file),
+                  (try? data.write(to: url, options: .atomic)) != nil
+            else { return nil }
+            return PartnerStore(storeURL: url)
+        }
+
+        guard let store = makeStore(collection: []) else {
+            expect(false, "a store can be built from a written save")
+            return
+        }
+
+        expect(store.importCard("not a card") == .rejected(.notACard), "junk is not imported")
+
+        let friend = card(tamer: "Grace", seed: 777, id: sample.id)
+        let friendCode = TamerCardCodec.encode(friend)
+        expect(store.importCard(friendCode) == .imported("Grace"), "a friend's card is imported")
+        expect(store.friends.count == 1, "the friend is remembered")
+
+        // Re-importing the same friend after they digivolve replaces their card
+        // rather than stacking a second one beside it.
+        expect(store.importCard(friendCode) == .imported("Grace"), "re-importing is allowed")
+        expect(store.friends.count == 1, "re-importing replaces rather than duplicates")
+
+        // Fusing with yourself is not a Jogress.
+        if let ownCard = store.myCard(name: "Me") {
+            let own = TamerCardCodec.encode(ownCard)
+            expect(store.importCard(own) == .ownCard, "your own card is refused")
+        }
+
+        // With nothing graduated there is nothing to spend.
+        expect(
+            store.jogress(graduated, with: friend) == .notInCollection,
+            "a partner outside the collection cannot be spent"
+        )
+
+        // The real path: a graduated partner fuses and is consumed.
+        guard let fusing = makeStore(collection: [graduated]) else {
+            expect(false, "a store with a collection can be built")
+            return
+        }
+        fusing.importCard(friendCode)
+        let before = fusing.collection.count
+        let result = fusing.jogress(graduated, with: friend)
+        guard case .fused(let name) = result else {
+            expect(false, "a graduated partner fuses with a visiting one (got \(result))")
+            return
+        }
+        expect(!name.isEmpty, "the fusion produced a form (\(name))")
+        expect(fusing.collection.count == before, "the fused partner replaced the one spent")
+        expect(
+            !fusing.collection.contains { $0.id == graduated.id },
+            "the partner that was spent is gone"
+        )
+        expect(fusing.friends.count == 1, "the visiting tamer's card is not consumed")
+        expect(
+            fusing.seenDigimon.count > 1,
+            "the fused form is recorded in the DigiDex"
+        )
+
+        // Determinism, for the same reason digivolution is: re-importing a card
+        // must not become a way to reroll a form the tamer did not like.
+        guard let replay = makeStore(collection: [graduated]),
+              case .fused(let again) = replay.jogress(graduated, with: friend)
+        else {
+            expect(false, "the replay fused at all")
+            return
+        }
+        expect(again == name, "the same pair always fuses into the same form")
+
+        // A canary for the ordering, not merely for the value. The fusion pool
+        // is built from a Set intersection, and Swift seeds its hasher per
+        // process — so before that pool was sorted, this pair produced a
+        // different form on most launches. A single process cannot observe that
+        // variance, but a pinned outcome catches its return: with the sort gone
+        // this fails on four runs in five.
+        //
+        // Regenerating digidex.bin can legitimately move this. If it does, check
+        // that fusions are still stable across launches before updating it.
+        expect(
+            name == "Shoutmon X7(Superior Mode)",
+            "the fusion is pinned across launches, not just within one (got \(name))"
+        )
+    }
+
+    /// Mirror of the codec's private decoder, so the test can look inside a card
+    /// rather than trusting the encoder to describe itself.
+    static func decodeBase64url(_ string: String) -> Data? {
+        var s = string
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        while s.count % 4 != 0 { s += "=" }
+        return Data(base64Encoded: s)
     }
 
     static func testRealLogs() async {

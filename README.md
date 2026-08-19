@@ -202,6 +202,58 @@ direction and then watching the roll ignore you would be the worst of both
 designs. It is only spent when the rung can actually honour it — many early
 stages carry no field data, and a purchase should not evaporate on one of them.
 
+## The coach
+
+A section in the Usage tab that reads the same events the partner grows on and
+says where the money is going. Four rules, each gated on a measurement that is
+shown alongside it:
+
+| Rule | Fires when |
+|---|---|
+| Cache reuse | Under 60% of what you send comes back off the cache. |
+| Cache amortisation | Fewer than 2 reads per write, and writes are a quarter of the bill. |
+| Session overhead | Median session under 50K billable *and* mostly setup cost. |
+| Model mix | One model is over 70% of estimated cost while cheaper configured ones handle under 15% of tokens. |
+
+**No rule fires without its number, and the number is always displayed.** Advice
+that cannot point at a figure is a horoscope, and an app that lectures you about
+habits it has not measured is worse than one that says nothing. When nothing
+fires, the section says so and still shows the basis it judged on.
+
+The thresholds were calibrated against real logs rather than picked for
+roundness, because the failure mode that matters is nagging someone who is
+already working well. The reference profile — 97% cache share, 43× amortisation,
+a 336K median session — comes out with everything silent except the model split.
+`testCoach` pins that silence so a later retune cannot quietly start crying wolf.
+
+The model rule deliberately stops at reporting the split. Whether a given task
+needed the larger model is not in the logs, and the coach does not pretend
+otherwise.
+
+## Tamer cards and Jogress between tamers
+
+A **Tamer Card** is a short string describing you and your current partner:
+
+```
+DTB1.eyJhdHRyaWJ1dGUiOiJWYWNjaW5lIiwi….3f2a91c4
+```
+
+Copy it, paste it to a friend, and they can Jogress one of *their* graduated
+partners with yours. The card is the only thing in this app that ever leaves the
+machine, and it leaves only when you copy it yourself. It carries the partner's
+identity and a handful of figures worth showing off — no logs, no project names,
+no timings, no paths. A test asserts the payload contains nothing else.
+
+There is no account and no server. The transport is whatever you already use to
+talk to each other, so the format is built for a chat window: it survives being
+wrapped across lines, and a checksum means a truncated paste is *refused* rather
+than silently decoding into a different partner.
+
+Fusing spends one of your own retired partners and leaves the visitor untouched
+— their card is a photograph, not a transfer of custody, and nothing here reaches
+their machine. The outcome is seeded from both partners, so re-importing a card
+is not a way to reroll a form you did not like.
+
 ## Attribution and licensing
 
 This project is licensed in two parts, because the code and the Digimon data do
