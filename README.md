@@ -220,6 +220,14 @@ that cannot point at a figure is a horoscope, and an app that lectures you about
 habits it has not measured is worse than one that says nothing. When nothing
 fires, the section says so and still shows the basis it judged on.
 
+The report is **per tool**, and its heading names which one — it follows the
+same picker as the totals above it. All four rules describe a setup rather than
+a person: cache behaviour, session length and which models are in the mix are
+configured separately for each agent, so a figure measured on one says nothing
+about the other. Pooling them is worse than useless, because the tool used well
+masks the one that is not: on the reference machine the combined report is
+silent about a second tool re-sending all of its context.
+
 The thresholds were calibrated against real logs rather than picked for
 roundness, because the failure mode that matters is nagging someone who is
 already working well. The reference profile — 97% cache share, 43× amortisation,
