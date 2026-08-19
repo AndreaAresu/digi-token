@@ -1,6 +1,6 @@
 import AppKit
 
-/// The popover: a tab strip, one of three panes, and a footer.
+/// The popover: a tab strip, one of five panes, and a footer.
 @MainActor
 final class PopoverController: NSViewController {
     private let store: PartnerStore
@@ -16,9 +16,11 @@ final class PopoverController: NSViewController {
     private lazy var usagePane = UsagePane(monitor: monitor)
     private lazy var shopPane = ShopPane(store: store)
     private lazy var dexPane = DexPane(store: store)
+    private lazy var tamerPane = TamerPane(store: store)
     private lazy var scrollers: [NSScrollView] = []
 
-    private var panes: [NSView] { [partnerPane, usagePane, dexPane] }
+    /// Index of the DigiDex tab, which is the one pane that scrolls itself.
+    private static let dexTab = 3
 
     init(store: PartnerStore, monitor: UsageMonitor) {
         self.store = store
@@ -34,8 +36,8 @@ final class PopoverController: NSViewController {
             x: 0, y: 0, width: Theme.popoverWidth, height: Theme.contentHeight + 76
         ))
 
-        tabs.segmentCount = 4
-        for (index, title) in ["Partner", "Usage", "Shop", "DigiDex"].enumerated() {
+        tabs.segmentCount = 5
+        for (index, title) in ["Partner", "Usage", "Shop", "DigiDex", "Tamer"].enumerated() {
             tabs.setLabel(title, forSegment: index)
         }
         tabs.selectedSegment = 0
@@ -45,8 +47,9 @@ final class PopoverController: NSViewController {
 
         container.translatesAutoresizingMaskIntoConstraints = false
 
-        // These scroll; the DigiDex manages its own scroll view.
-        for pane in [partnerPane, usagePane, shopPane] as [NSView] {
+        // Everything but the DigiDex lives in a scroller; the order here is the
+        // tab order, with the DigiDex slotted in at `dexTab` afterwards.
+        for pane in [partnerPane, usagePane, shopPane, tamerPane] as [NSView] {
             let scroller = NSScrollView()
             scroller.hasVerticalScroller = true
             scroller.drawsBackground = false
@@ -149,6 +152,7 @@ final class PopoverController: NSViewController {
         usagePane.refresh()
         shopPane.refresh()
         dexPane.refresh()
+        tamerPane.refresh()
 
         if let last = monitor.lastRefresh {
             let formatter = RelativeDateTimeFormatter()
@@ -169,10 +173,13 @@ final class PopoverController: NSViewController {
     }
 
     private func showPane(_ index: Int) {
+        // The scrollers hold every pane except the DigiDex, so tabs past it map
+        // one lower into that array.
+        let scrollerIndex = index > Self.dexTab ? index - 1 : index
         for (position, scroller) in scrollers.enumerated() {
-            scroller.isHidden = position != index
+            scroller.isHidden = index == Self.dexTab || position != scrollerIndex
         }
-        dexPane.isHidden = index != 3
+        dexPane.isHidden = index != Self.dexTab
     }
 
     @objc private func switchTab() {

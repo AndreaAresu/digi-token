@@ -24,6 +24,8 @@ final class PartnerStore {
     private(set) var frozenDays: Set<Date> = []
     /// An affinity bought for the *next* egg, applied when it hatches.
     private(set) var nextEggField: String?
+    /// Cards other tamers have handed over, newest first.
+    private(set) var friends: [TamerCard] = []
     var pendingEvent: DigivolutionEvent?
 
     /// Called after any change the UI should redraw for. AppKit does not observe
@@ -58,6 +60,7 @@ final class PartnerStore {
         var wallet: Wallet?
         var frozenDays: [Date]?
         var nextEggField: String?
+        var friends: [TamerCard]?
     }
 
     init(storeURL: URL = PartnerStore.defaultURL) {
@@ -86,6 +89,7 @@ final class PartnerStore {
             wallet = save.wallet ?? Wallet()
             frozenDays = Set(save.frozenDays ?? [])
             nextEggField = save.nextEggField
+            friends = save.friends ?? []
         } else {
             partner = Partner(seed: UInt64.random(in: 1...UInt64.max))
         }
@@ -343,6 +347,109 @@ final class PartnerStore {
         return result.entry
     }
 
+    // MARK: - Tamer cards
+
+    /// Why an import or a fusion did not happen, in terms the pane can show.
+    enum CardResult: Equatable {
+        case imported(String)
+        case ownCard
+        case stillAnEgg
+        case rejected(TamerCardCodec.DecodeError)
+    }
+
+    enum JogressResult: Equatable {
+        case fused(String)
+        case notInCollection
+        case noRoute
+    }
+
+    /// The card for the current partner, or nil while it is still an egg —
+    /// there is nothing to show off and nothing to fuse with yet.
+    func myCard(name: String) -> TamerCard? {
+        guard let entry = partner.entry else { return nil }
+        return TamerCard(
+            tamer: name.isEmpty ? "Tamer" : name,
+            seed: partner.seed,
+            digimonID: entry.id,
+            stage: partner.stage,
+            isXAntibody: partner.isXAntibody,
+            lineage: partner.lineage,
+            nickname: partner.nickname,
+            tokens: partner.tokens,
+            attribute: profile.attribute,
+            streak: profile.streak,
+            careMistakes: profile.careMistakes,
+            dexSeen: seenDigimon.count,
+            dexTotal: DigiDex.shared.all.count
+        )
+    }
+
+    /// Takes a pasted card in.
+    ///
+    /// Re-importing a friend whose partner has since digivolved replaces their
+    /// old card rather than adding a second one, so the list stays a list of
+    /// people rather than a log of every form they have passed through.
+    @discardableResult
+    func importCard(_ raw: String) -> CardResult {
+        let card: TamerCard
+        do {
+            card = try TamerCardCodec.decode(raw)
+        } catch let error as TamerCardCodec.DecodeError {
+            return .rejected(error)
+        } catch {
+            return .rejected(.unreadable)
+        }
+
+        // Fusing with yourself is not a Jogress, and a seed that matches one of
+        // your own partners is either your own card or a copy of it.
+        let mine = [partner.seed] + collection.map(\.seed)
+        guard !mine.contains(card.seed) else { return .ownCard }
+        guard card.entry != nil else { return .stillAnEgg }
+
+        friends.removeAll { $0.id == card.id }
+        friends.insert(card, at: 0)
+        save()
+        onChange?()
+        return .imported(card.tamer)
+    }
+
+    func forgetFriend(_ card: TamerCard) {
+        friends.removeAll { $0.id == card.id }
+        save()
+        onChange?()
+    }
+
+    /// Jogress across two tamers.
+    ///
+    /// Mirrors the local fusion deliberately: it spends one of *your* graduated
+    /// partners and leaves the visitor untouched. Their card is a photograph,
+    /// not a transfer of custody — nothing this app does should be able to
+    /// consume something on someone else's machine.
+    ///
+    /// The outcome is seeded from both partners, so importing the same card
+    /// twice and fusing the same partner cannot be used to reroll a form the
+    /// tamer did not like.
+    @discardableResult
+    func jogress(_ mine: Partner, with card: TamerCard) -> JogressResult {
+        guard collection.contains(where: { $0.id == mine.id }) else { return .notInCollection }
+        guard let result = Digivolution.jogress(mine, card.partner) else { return .noRoute }
+
+        var fused = Partner(seed: mine.seed ^ card.seed)
+        fused.digimonID = result.entry.id
+        fused.stage = result.entry.stageLabel ?? .ultimate
+        fused.isXAntibody = result.isXAntibody
+        fused.lineage = mine.lineage + card.lineage + [result.entry.id]
+        fused.hatchedAt = Date()
+        fused.retiredAt = Date()
+        fused.nickname = "Jogress · \(card.tamer)"
+        collection.removeAll { $0.id == mine.id }
+        collection.append(fused)
+        record(result.entry, isX: result.isXAntibody)
+        save()
+        onChange?()
+        return .fused(result.entry.name)
+    }
+
     var completion: Double {
         let total = DigiDex.shared.all.count
         guard total > 0 else { return 0 }
@@ -354,7 +461,8 @@ final class PartnerStore {
             partner: partner, collection: collection,
             seenDigimon: Array(seenDigimon), seenXAntibody: Array(seenXAntibody),
             baseline: baseline, hasBaseline: hasBaseline, profile: profile,
-            wallet: wallet, frozenDays: Array(frozenDays), nextEggField: nextEggField
+            wallet: wallet, frozenDays: Array(frozenDays), nextEggField: nextEggField,
+            friends: friends
         )
         guard let data = try? JSONEncoder().encode(file) else { return }
         try? data.write(to: storeURL, options: .atomic)
