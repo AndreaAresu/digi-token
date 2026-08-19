@@ -47,11 +47,7 @@ final class TamerPane: NSView {
         copyButton.action = #selector(copyCard)
         pasteButton.action = #selector(pasteCard)
 
-        for label in [status, friendsEmpty, eggNote] {
-            label.maximumNumberOfLines = 0
-            label.lineBreakMode = .byWordWrapping
-            label.preferredMaxLayoutWidth = Theme.popoverWidth - 28
-        }
+        for label in [status, friendsEmpty, eggNote] { UI.wraps(label) }
 
         let buttons = UI.stack(.horizontal, spacing: 8, [copyButton, pasteButton])
         buttons.distribution = .fillEqually

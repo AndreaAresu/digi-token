@@ -135,6 +135,13 @@ final class PopoverController: NSViewController {
 
         NSLayoutConstraint.activate([
             root.heightAnchor.constraint(equalToConstant: Theme.contentHeight + 76),
+            // The popover sizes itself from this view, and every pane hangs off
+            // it through a chain of equal widths. Without this the widest piece
+            // of text anywhere in the app decides how wide the window opens —
+            // one sentence in the shop was pushing it to 592 points. Wrapping
+            // labels all declare a `preferredMaxLayoutWidth` (see `UI.wraps`),
+            // so nothing has to be squeezed for this to hold.
+            root.widthAnchor.constraint(equalToConstant: Theme.popoverWidth),
 
             tabs.topAnchor.constraint(equalTo: root.topAnchor, constant: 10),
             tabs.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 10),

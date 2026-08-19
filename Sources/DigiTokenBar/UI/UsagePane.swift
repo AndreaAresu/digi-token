@@ -59,10 +59,8 @@ final class UsagePane: NSView {
         ])
         self.projectsSection = projectsSection
 
-        emptyLabel.maximumNumberOfLines = 3
-        emptyLabel.lineBreakMode = .byWordWrapping
-        privacyNote.maximumNumberOfLines = 3
-        privacyNote.lineBreakMode = .byWordWrapping
+        UI.wraps(emptyLabel, lines: 3)
+        UI.wraps(privacyNote, lines: 3)
 
         contentStack = UI.stack(.vertical, spacing: 12, [
             picker, row1, row2, blockCard, historyStack, projectsSection,

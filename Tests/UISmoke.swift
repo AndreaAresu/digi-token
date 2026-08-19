@@ -70,6 +70,32 @@ enum UISmoke {
             controller.refresh()
         }
         print("ok  all five tabs refreshed")
+
+        // 7. The popover has one width, and it is the one Theme declares.
+        //
+        //    A multi-line label with no `preferredMaxLayoutWidth` reports the
+        //    width of its whole string, and the panes chain equal widths from
+        //    every label up to the root — so one long sentence in the shop was
+        //    enough to open the window at 592 points instead of 340. The root
+        //    now pins the width, which makes that failure silent rather than
+        //    visible, so the check has to be on the content underneath it.
+        var overwide: [(String, CGFloat)] = []
+        func measure(_ view: NSView) {
+            let width = view.fittingSize.width
+            if width > Theme.popoverWidth {
+                let text = (view as? NSTextField).map { " «\($0.stringValue.prefix(48))»" } ?? ""
+                overwide.append(("\(type(of: view))\(text)", width))
+            }
+            view.subviews.forEach(measure)
+        }
+        measure(v)
+        guard overwide.isEmpty else {
+            print("FAIL  content wider than the \(Int(Theme.popoverWidth))pt popover:")
+            for (name, width) in overwide { print("      \(Int(width))pt  \(name)") }
+            exit(1)
+        }
+        print("ok  nothing exceeds the \(Int(Theme.popoverWidth))pt width")
+
         print("\nUI smoke passed")
         exit(0)
     }

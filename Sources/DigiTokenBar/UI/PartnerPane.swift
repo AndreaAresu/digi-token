@@ -79,8 +79,7 @@ final class PartnerPane: NSView {
         let careRow2 = UI.stack(.horizontal, spacing: 8, [careTiles[2], careTiles[3]])
         careRow1.distribution = .fillEqually
         careRow2.distribution = .fillEqually
-        alignmentNote.lineBreakMode = .byWordWrapping
-        alignmentNote.maximumNumberOfLines = 3
+        UI.wraps(alignmentNote, lines: 3)
         let care = UI.stack(.vertical, spacing: 6, [
             UI.caption("Care"), careRow1, careRow2, alignmentNote,
         ])
