@@ -4,17 +4,24 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let store = PartnerStore()
     private lazy var monitor = UsageMonitor()
+    private let settings = Settings.shared
+
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private var controller: PopoverController!
-    private var eventMonitor: Any?
+    private var pet: FloatingPetPanel?
+
+    /// The partner's artwork at menu-bar scale, kept so the idle bob can redraw
+    /// it at a new offset without going back through the loader.
+    private var menuBarArtwork: NSImage?
+    private var bobTimer: Timer?
+    private var bobPhase = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.target = self
         statusItem.button?.action = #selector(togglePopover)
         statusItem.button?.imagePosition = .imageLeading
-        statusItem.button?.title = " —"
         statusItem.button?.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
 
         controller = PopoverController(store: store, monitor: monitor)
@@ -25,9 +32,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
         monitor.attach(partnerStore: store)
         monitor.onChange = { [weak self] in self?.updateStatusItem() }
-        store.onChange = { [weak self] in self?.updateStatusItem() }
+        store.onChange = { [weak self] in
+            self?.updateStatusItem()
+            self?.pet?.refresh()
+        }
+        store.onDigivolution = { event in
+            event.stage == .babyI && event.reason == "hatched"
+                ? Notifier.hatched(event.to)
+                : Notifier.digivolved(event)
+        }
+        settings.onChange = { [weak self] in self?.applySettings() }
+
+        SpriteLoader.removeStaleCaches()
+        Notifier.requestAuthorizationIfNeeded()
+        monitor.refreshInterval = TimeInterval(settings.refreshMinutes * 60)
         monitor.start()
 
+        applySettings()
         updateStatusItem()
 
         // Opening the popover normally needs a click, which makes the UI awkward
@@ -44,14 +65,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         store.save()
     }
 
+    // MARK: - Settings
+
+    private func applySettings() {
+        monitor.refreshInterval = TimeInterval(settings.refreshMinutes * 60)
+        updateFloatingPet()
+        updateBobTimer()
+        updateStatusItem()
+    }
+
+    private func updateFloatingPet() {
+        if settings.floatingPetEnabled {
+            if pet == nil { pet = FloatingPetPanel(store: store) }
+            pet?.applySize(settings.petSize)
+            pet?.refresh()
+            pet?.orderFront(nil)
+        } else {
+            pet?.orderOut(nil)
+            pet = nil
+        }
+    }
+
+    // MARK: - Menu bar
+
+    private func updateBobTimer() {
+        bobTimer?.invalidate()
+        bobTimer = nil
+        bobPhase = 0
+        guard settings.animateSprite else {
+            redrawStatusImage()
+            return
+        }
+        // Four frames a second is enough to read as motion and costs nothing;
+        // the status item is 18 points tall and the offsets are whole pixels.
+        bobTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.bobPhase = (self.bobPhase + 1) % Self.bobOffsets.count
+                self.redrawStatusImage()
+            }
+        }
+    }
+
+    private static let bobOffsets: [CGFloat] = [0, 1, 2, 1, 0, 0, 1, 0]
+
+    private func redrawStatusImage() {
+        guard let button = statusItem.button else { return }
+        guard let artwork = menuBarArtwork else { return }
+        let lift = settings.animateSprite ? Self.bobOffsets[bobPhase] : 0
+        button.image = MenuBarSprite.render(artwork, lift: lift)
+    }
+
     /// Keeps the menu bar showing the partner and today's billable total.
     private func updateStatusItem() {
         guard let button = statusItem.button else { return }
 
         let today = monitor.snapshot.combinedToday.billable
-        button.title = today > 0 ? " \(TokenFormatter.short(today))" : ""
+        button.title = settings.showTokensInMenuBar && today > 0
+            ? " \(TokenFormatter.short(today))"
+            : ""
 
         guard let entry = store.partner.entry else {
+            menuBarArtwork = nil
             button.image = NSImage(
                 systemSymbolName: "oval.portrait.fill", accessibilityDescription: "DigiEgg"
             )
@@ -63,7 +138,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         Task { [weak self] in
             guard let image = await SpriteLoader.shared.image(for: entry) else { return }
             await MainActor.run {
-                self?.statusItem.button?.image = MenuBarSprite.render(image)
+                guard let self else { return }
+                self.menuBarArtwork = image
+                self.redrawStatusImage()
             }
         }
     }

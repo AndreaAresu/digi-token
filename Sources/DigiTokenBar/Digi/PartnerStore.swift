@@ -25,6 +25,11 @@ final class PartnerStore {
     /// anything on its own, so the store says explicitly when it moved.
     var onChange: (() -> Void)?
 
+    /// Fired once per digivolution, at the moment it happens. `pendingEvent`
+    /// lingers until the tamer dismisses the banner, so it cannot be used to
+    /// drive a notification without repeating it on every refresh.
+    var onDigivolution: ((DigivolutionEvent) -> Void)?
+
     /// All-time tokens at the moment the current partner was born. The partner's
     /// own total is the difference, so a fresh egg starts at zero without us
     /// having to rewrite history.
@@ -101,10 +106,12 @@ final class PartnerStore {
             partner.lineage = [result.entry.id]
             partner.digivolutionDates = [Date()]
             record(result.entry, isX: false)
-            pendingEvent = DigivolutionEvent(
+            let event = DigivolutionEvent(
                 from: "DigiTama", to: result.entry, stage: .babyI,
                 isXAntibody: false, reason: "hatched", date: Date()
             )
+            pendingEvent = event
+            onDigivolution?(event)
             return
         }
 
@@ -128,10 +135,12 @@ final class PartnerStore {
             partner.digivolutionDates.append(Date())
             record(result.entry, isX: result.isXAntibody)
 
-            pendingEvent = DigivolutionEvent(
+            let event = DigivolutionEvent(
                 from: current.name, to: result.entry, stage: nextStage,
                 isXAntibody: result.isXAntibody, reason: result.reason, date: Date()
             )
+            pendingEvent = event
+            onDigivolution?(event)
         }
     }
 

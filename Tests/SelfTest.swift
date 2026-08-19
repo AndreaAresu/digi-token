@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// Headless checks over the real logs on this machine plus synthetic fixtures.
@@ -55,6 +56,9 @@ enum SelfTest {
 
         section("Cache retention")
         testRetention()
+
+        section("Sprite processing")
+        testSpriteProcessing()
 
         section("Real logs on this machine")
         await testRealLogs()
@@ -373,6 +377,84 @@ enum SelfTest {
         expect(usage.sessionCount == 2, "session count spans both")
         expect(usage.activeDays.count == 2, "active days span both")
         expect(usage.today.input == 500, "today counts only the recent event")
+    }
+
+    /// digi-api paints almost every Digimon on a solid white card, which reads as
+    /// a white rectangle on the app's dark panel. The fill has to remove the card
+    /// without eating white *inside* the artwork — Angemon's wings and Zurumon's
+    /// eye highlights are the cases that break a naive brightness threshold.
+    static func testSpriteProcessing() {
+        // A white card, a dark ring, and a white core inside the ring.
+        let size = 80
+        let image = NSImage(size: NSSize(width: size, height: size))
+        image.lockFocus()
+        NSColor.white.setFill()
+        NSRect(x: 0, y: 0, width: size, height: size).fill()
+        NSColor.black.setFill()
+        NSBezierPath(ovalIn: NSRect(x: 20, y: 20, width: 40, height: 40)).fill()
+        NSColor.white.setFill()
+        NSBezierPath(ovalIn: NSRect(x: 32, y: 32, width: 16, height: 16)).fill()
+        image.unlockFocus()
+
+        let processed = SpriteProcessor.process(image)
+        guard let sampler = PixelSampler(processed) else {
+            expect(false, "processed image is readable")
+            return
+        }
+
+        expect(
+            sampler.alpha(atFraction: 0.02, 0.02) < 16,
+            "the background card is removed from the corners"
+        )
+        expect(
+            sampler.alpha(atFraction: 0.5, 0.5) > 200,
+            "white enclosed by the artwork survives"
+        )
+        expect(
+            processed.size.width < image.size.width || processed.size.height < image.size.height,
+            "the result is cropped to the artwork (\(Int(processed.size.width))x\(Int(processed.size.height)))"
+        )
+
+        // An image that is already a cut-out must be trimmed, not re-keyed.
+        let cutout = NSImage(size: NSSize(width: size, height: size))
+        cutout.lockFocus()
+        NSColor.white.withAlphaComponent(1).setFill()
+        NSBezierPath(ovalIn: NSRect(x: 30, y: 30, width: 20, height: 20)).fill()
+        cutout.unlockFocus()
+        let trimmed = SpriteProcessor.process(cutout)
+        expect(
+            trimmed.size.width < 40 && trimmed.size.height < 40,
+            "an existing cut-out is trimmed to its content (\(Int(trimmed.size.width))x\(Int(trimmed.size.height)))"
+        )
+    }
+
+    /// Minimal RGBA reader, so the checks above can talk about pixels.
+    struct PixelSampler {
+        let buffer: [UInt8]
+        let width: Int
+        let height: Int
+
+        init?(_ image: NSImage) {
+            var rect = NSRect(origin: .zero, size: image.size)
+            guard let cg = image.cgImage(forProposedRect: &rect, context: nil, hints: nil)
+            else { return nil }
+            width = cg.width
+            height = cg.height
+            var pixels = [UInt8](repeating: 0, count: width * height * 4)
+            guard let context = CGContext(
+                data: &pixels, width: width, height: height, bitsPerComponent: 8,
+                bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return nil }
+            context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+            buffer = pixels
+        }
+
+        func alpha(atFraction x: Double, _ y: Double) -> Int {
+            let px = min(width - 1, max(0, Int(Double(width) * x)))
+            let py = min(height - 1, max(0, Int(Double(height) * y)))
+            return Int(buffer[(py * width + px) * 4 + 3])
+        }
     }
 
     static func testRealLogs() async {

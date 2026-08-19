@@ -89,13 +89,20 @@ final class PopoverController: NSViewController {
         refreshButton.action = #selector(refreshNow)
         refreshButton.toolTip = "Refresh now"
 
+        let gear = NSButton()
+        gear.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")
+        gear.isBordered = false
+        gear.target = self
+        gear.action = #selector(showSettings(_:))
+        gear.toolTip = "Settings"
+
         let quit = NSButton(title: "Quit", target: self, action: #selector(quit))
         quit.isBordered = false
         quit.font = .systemFont(ofSize: 11)
         quit.contentTintColor = .secondaryLabelColor
 
         let footer = UI.stack(.horizontal, spacing: 8, [
-            refreshButton, statusLabel, UI.spacer(), quit,
+            refreshButton, statusLabel, UI.spacer(), gear, quit,
         ])
 
         let divider = NSBox()
@@ -176,6 +183,79 @@ final class PopoverController: NSViewController {
 
     @objc private func quit() {
         NSApplication.shared.terminate(nil)
+    }
+
+    // MARK: - Settings menu
+
+    @objc private func showSettings(_ sender: NSButton) {
+        let settings = Settings.shared
+        let menu = NSMenu()
+
+        menu.addItem(toggle("Show token count in menu bar", #selector(toggleTokens), settings.showTokensInMenuBar))
+        menu.addItem(toggle("Animate the partner", #selector(toggleAnimation), settings.animateSprite))
+        menu.addItem(toggle("Floating desktop pet", #selector(togglePet), settings.floatingPetEnabled))
+        menu.addItem(toggle("Notify on digivolution", #selector(toggleNotifications), settings.notificationsEnabled))
+        menu.addItem(.separator())
+        menu.addItem(toggle("Launch at login", #selector(toggleLogin), settings.launchesAtLogin))
+
+        menu.addItem(.separator())
+        let refresh = NSMenuItem(title: "Refresh every", action: nil, keyEquivalent: "")
+        refresh.isEnabled = false
+        menu.addItem(refresh)
+        for minutes in [1, 2, 5, 15] {
+            let item = NSMenuItem(
+                title: "\(minutes) min", action: #selector(pickRefresh(_:)), keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = minutes
+            item.state = settings.refreshMinutes == minutes ? .on : .off
+            menu.addItem(item)
+        }
+
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 4), in: sender)
+    }
+
+    private func toggle(_ title: String, _ action: Selector, _ on: Bool) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        item.state = on ? .on : .off
+        return item
+    }
+
+    @objc private func toggleTokens() {
+        Settings.shared.showTokensInMenuBar.toggle()
+    }
+
+    @objc private func toggleAnimation() {
+        Settings.shared.animateSprite.toggle()
+        refresh()
+    }
+
+    @objc private func togglePet() {
+        Settings.shared.floatingPetEnabled.toggle()
+    }
+
+    @objc private func toggleNotifications() {
+        Settings.shared.notificationsEnabled.toggle()
+        Notifier.requestAuthorizationIfNeeded()
+    }
+
+    @objc private func toggleLogin() {
+        let settings = Settings.shared
+        if let error = settings.setLaunchAtLogin(!settings.launchesAtLogin) {
+            // Registration fails for a build that is not in /Applications, which
+            // is worth saying rather than silently doing nothing.
+            let alert = NSAlert()
+            alert.messageText = "Could not change the login item"
+            alert.informativeText =
+                "\(error.localizedDescription)\n\nThis usually means the app is running from somewhere other than /Applications."
+            alert.runModal()
+        }
+    }
+
+    @objc private func pickRefresh(_ sender: NSMenuItem) {
+        guard let minutes = sender.representedObject as? Int else { return }
+        Settings.shared.refreshMinutes = minutes
     }
 }
 
