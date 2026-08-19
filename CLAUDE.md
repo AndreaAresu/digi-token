@@ -64,9 +64,12 @@ entry in `UsageMonitor.init`. **Never** branch on a provider name outside
   starting over. Any new persisted type must do the same, and
   `testSaveCompatibility` must keep passing.
 - **No artwork ships in the binary.** `digidex.bin` is data only (deflated JSON). Images are
-  fetched from digi-api.com at runtime and cached per user. The DigiDex grid
-  must not fetch artwork for Digimon the tamer has not met — that is both a
-  bandwidth fix and the intended game feel.
+  fetched from digi-api.com at runtime and cached per user, as HEIC. The DigiDex
+  grid must not fetch artwork for the roster at large — that is both a bandwidth
+  fix and the intended game feel. The one exception is forms exactly one
+  digivolution from something the tamer has met, which are shown as flattened
+  silhouettes; do not widen it. Reference-book text follows the same rule and is
+  fetched only when a card is actually opened.
 
 ## Calibration changes need evidence
 

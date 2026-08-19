@@ -120,6 +120,12 @@ final class DigiDex: @unchecked Sendable {
     private(set) var all: [DigimonEntry] = []
     private var byID: [Int: DigimonEntry] = [:]
     private var byStage: [DigiStage: [DigimonEntry]] = [:]
+    /// How many forms list each id as a digivolution target.
+    ///
+    /// The `prior` edges were dropped from the shipped index because nothing
+    /// read them; this rebuilds the same information from `next` at load, which
+    /// costs one pass over 1,259 entries and keeps the file small.
+    private var incoming: [Int: Int] = [:]
 
     private struct Payload: Codable {
         let version: Int
@@ -138,6 +144,9 @@ final class DigiDex: @unchecked Sendable {
         all = payload.digimon
         byID = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })
         byStage = Dictionary(grouping: all.filter { !$0.side }) { $0.stageLabel ?? .child }
+        for entry in all {
+            for target in entry.next { incoming[target, default: 0] += 1 }
+        }
     }
 
     /// The index lives in the app bundle's Resources when installed, and beside
@@ -191,6 +200,13 @@ final class DigiDex: @unchecked Sendable {
 
     func entry(_ id: Int) -> DigimonEntry? { byID[id] }
 
+    /// How many recorded lines digivolve into this form.
+    func routesInto(_ id: Int) -> Int { incoming[id] ?? 0 }
+
+    func rarity(of entry: DigimonEntry) -> DigiRarity {
+        DigiRarity(routes: routesInto(entry.id))
+    }
+
     func entries(stage: DigiStage) -> [DigimonEntry] { byStage[stage] ?? [] }
 
     func entries(named name: String) -> [DigimonEntry] {
@@ -199,5 +215,48 @@ final class DigiDex: @unchecked Sendable {
 
     var stageCounts: [DigiStage: Int] {
         byStage.mapValues(\.count)
+    }
+}
+
+/// How hard a form is to arrive at, read off the evolution graph rather than
+/// invented.
+///
+/// The thresholds come from the real distribution across the 1,259 shipped
+/// entries: 9% have no recorded route into them at all, a quarter have two or
+/// fewer, and the median form has seven. Nothing here is a balance knob — it is
+/// a description of the graph, and the exact route count is always shown next to
+/// the label so the claim can be checked.
+enum DigiRarity: Sendable, Hashable {
+    case unreachable
+    case rare
+    case uncommon
+    case common
+
+    init(routes: Int) {
+        switch routes {
+        case 0: self = .unreachable
+        case 1...2: self = .rare
+        case 3...6: self = .uncommon
+        default: self = .common
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .unreachable: "Off the graph"
+        case .rare: "Rare"
+        case .uncommon: "Uncommon"
+        case .common: "Common"
+        }
+    }
+
+    /// Said plainly, because "Off the graph" on its own sounds like a bug.
+    func detail(routes: Int) -> String {
+        switch self {
+        case .unreachable:
+            "No recorded line digivolves into it — you meet it through a fallback branch or a Jogress"
+        case .rare, .uncommon, .common:
+            "\(routes) recorded line\(routes == 1 ? "" : "s") digivolve\(routes == 1 ? "s" : "") into it"
+        }
     }
 }

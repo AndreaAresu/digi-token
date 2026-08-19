@@ -1,7 +1,12 @@
 import AppKit
 
 /// The collection screen: everything the tamer has met, and everything still out
-/// there. Unmet forms stay visible as silhouettes — the roster is the point.
+/// there.
+///
+/// Three states, deliberately. Met forms show their artwork and open a card;
+/// forms one digivolution away show a flattened silhouette; the rest stay a
+/// dashed mark whose image is never fetched. Names are always visible, so search
+/// still works on the whole roster.
 @MainActor
 final class DexPane: NSView {
     private let store: PartnerStore
@@ -14,6 +19,16 @@ final class DexPane: NSView {
     private let stageMenu = NSPopUpButton()
     private let grid = UI.stack(.vertical, spacing: 8, [])
     private let scroll = NSScrollView()
+    private let detail = DexDetailView()
+
+    /// Forms one step from something the tamer has met.
+    ///
+    /// These are the only unmet Digimon whose artwork is fetched. Silhouetting
+    /// the whole roster would mean pulling 1,259 images from digi-api the first
+    /// time this tab is opened, which is both rude to a free API and the
+    /// opposite of the discovery the grid is for. A form you could reach next is
+    /// a tease; the other thousand are a spoiler.
+    private var reachable: Set<Int> = []
 
     /// Building 1200 sprite views at once would stall the popover; the tamer
     /// narrows with search instead of scrolling the whole roster.
@@ -67,6 +82,10 @@ final class DexPane: NSView {
 
         let root = UI.stack(.vertical, spacing: 8, [header, bar, controls, scroll])
         addSubview(root)
+
+        detail.translatesAutoresizingMaskIntoConstraints = false
+        detail.isHidden = true
+        addSubview(detail)
         NSLayoutConstraint.activate([
             root.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
             root.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
@@ -77,6 +96,11 @@ final class DexPane: NSView {
             controls.widthAnchor.constraint(equalTo: root.widthAnchor),
             scroll.widthAnchor.constraint(equalTo: root.widthAnchor),
             clip.widthAnchor.constraint(equalTo: scroll.widthAnchor),
+
+            detail.topAnchor.constraint(equalTo: topAnchor),
+            detail.bottomAnchor.constraint(equalTo: bottomAnchor),
+            detail.leadingAnchor.constraint(equalTo: leadingAnchor),
+            detail.trailingAnchor.constraint(equalTo: trailingAnchor),
         ])
     }
 
@@ -86,6 +110,12 @@ final class DexPane: NSView {
         bar.value = store.completion
         xLabel.stringValue = store.seenXAntibody.isEmpty ? "" : "X ×\(store.seenXAntibody.count)"
         raisedLabel.stringValue = "\(store.collection.count) raised"
+
+        let seen = store.seenDigimon
+        reachable = Set(
+            seen.compactMap { DigiDex.shared.entry($0)?.next }.joined()
+        ).subtracting(seen)
+
         rebuildGrid()
     }
 
@@ -123,8 +153,14 @@ final class DexPane: NSView {
 
         for start in stride(from: 0, to: shown.count, by: columns) {
             let slice = shown[start..<min(start + columns, shown.count)]
-            var cells: [NSView] = slice.map {
-                DexCell(entry: $0, seen: store.seenDigimon.contains($0.id))
+            var cells: [NSView] = slice.map { entry in
+                DexCell(
+                    entry: entry,
+                    seen: store.seenDigimon.contains(entry.id),
+                    reachable: reachable.contains(entry.id)
+                ) { [weak self] tapped in
+                    self?.present(tapped)
+                }
             }
             // Pad the last row so its cells keep the same width as every other.
             while cells.count < columns { cells.append(NSView()) }
@@ -149,13 +185,35 @@ final class DexPane: NSView {
         }
     }
 
+    /// Only met forms open a card. A silhouette that unfolded into a full
+    /// reference entry would hand over exactly what it is meant to withhold.
+    private func present(_ entry: DigimonEntry) {
+        guard store.seenDigimon.contains(entry.id) else { return }
+        detail.show(entry) { [weak self] in
+            self?.detail.isHidden = true
+        }
+        detail.isHidden = false
+    }
+
     @objc private func filterChanged() { rebuildGrid() }
 }
 
 /// One Digimon in the grid.
 @MainActor
 final class DexCell: NSView {
-    init(entry: DigimonEntry, seen: Bool) {
+    private let entry: DigimonEntry
+    private let seen: Bool
+    private let onTap: (DigimonEntry) -> Void
+
+    init(
+        entry: DigimonEntry,
+        seen: Bool,
+        reachable: Bool,
+        onTap: @escaping (DigimonEntry) -> Void
+    ) {
+        self.entry = entry
+        self.seen = seen
+        self.onTap = onTap
         super.init(frame: .zero)
 
         wantsLayer = true
@@ -165,12 +223,14 @@ final class DexCell: NSView {
                 .withAlphaComponent(0.13).cgColor
         }
 
-        // Unmet forms show a generic silhouette rather than their real artwork.
-        // It reads better as a collection — an unknown should look unknown — and
-        // it keeps the app from pulling a thousand images the tamer never earned.
+        // Three states, not two: met forms show their artwork, forms one step
+        // away show a flattened silhouette, and everything else stays a mark
+        // whose image is never fetched at all.
         let sprite = SpriteView(size: 42)
         if seen {
             sprite.show(entry)
+        } else if reachable {
+            sprite.showSilhouette(entry)
         } else {
             sprite.showUnknown()
         }
@@ -195,13 +255,31 @@ final class DexCell: NSView {
             name.widthAnchor.constraint(equalToConstant: 62),
         ])
 
-        toolTip = "\(entry.name) · \(entry.stageLabel?.dubName ?? entry.stage) · "
-            + "\(entry.attribute.rawValue)"
-            + (entry.primaryField.map { " · \($0)" } ?? "")
+        if seen {
+            toolTip = "\(entry.name) · \(entry.stageLabel?.dubName ?? entry.stage) · "
+                + "\(entry.attribute.rawValue)"
+                + (entry.primaryField.map { " · \($0)" } ?? "")
+                + "\nClick for the full entry"
+        } else if reachable {
+            toolTip = "\(entry.name) — one digivolution away from a form you have met"
+        } else {
+            toolTip = "Not met yet"
+        }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    override func mouseDown(with event: NSEvent) {
+        guard seen else { return }
+        onTap(entry)
+    }
+
+    /// A pointing cursor is the only affordance a 62-point cell has room for.
+    override func resetCursorRects() {
+        guard seen else { return }
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
 }
 
 /// Scroll views measure from the top when their document view is flipped, which
