@@ -13,6 +13,7 @@ final class UsagePane: NSView {
     private let blockStats = UI.label("", size: 10, color: .secondaryLabelColor, mono: true)
     private let histogram = HistogramView()
     private let emptyLabel = UI.label("", size: 11, color: .secondaryLabelColor, align: .center)
+    private let coach = CoachSection()
     private let privacyNote = UI.label(
         "DigiTokenBar reads Claude Code and Codex logs already on this Mac. Nothing leaves the machine.",
         size: 9, color: .tertiaryLabelColor, align: .center
@@ -65,7 +66,7 @@ final class UsagePane: NSView {
 
         contentStack = UI.stack(.vertical, spacing: 12, [
             picker, row1, row2, blockCard, historyStack, projectsSection,
-            emptyLabel, privacyNote,
+            coach, emptyLabel, privacyNote,
         ])
         addSubview(contentStack)
 
@@ -81,6 +82,7 @@ final class UsagePane: NSView {
             blockBar.widthAnchor.constraint(equalTo: blockInner.widthAnchor),
             histogram.widthAnchor.constraint(equalTo: historyStack.widthAnchor),
             projectsSection.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
+            coach.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
             projectStack.widthAnchor.constraint(equalTo: projectsSection.widthAnchor),
             emptyLabel.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
             privacyNote.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
@@ -106,6 +108,7 @@ final class UsagePane: NSView {
         blockCard.isHidden = !hasData
         historyStack.isHidden = !hasData
         emptyLabel.isHidden = hasData
+        coach.isHidden = !hasData
         tiles.forEach { $0.isHidden = !hasData }
 
         guard hasData else {
@@ -156,6 +159,10 @@ final class UsagePane: NSView {
         histogram.activeIndex = recent.last?.isActive == true ? recent.count - 1 : nil
 
         rebuildProjects(usage)
+        // Deliberately the whole event stream rather than the selected tool's:
+        // the coach describes how the tamer works, which does not change when
+        // they switch agent halfway through an afternoon.
+        coach.show(Coach.report(events: monitor.events))
     }
 
     private func rebuildProjects(_ usage: ProviderUsage) {
