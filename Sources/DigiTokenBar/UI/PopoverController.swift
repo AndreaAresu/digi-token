@@ -164,6 +164,12 @@ final class PopoverController: NSViewController {
 
     /// Called whenever the popover opens or the underlying data moves.
     func refresh() {
+        // `togglePopover` refreshes before it shows, so on the very first click
+        // this runs before AppKit has called `loadView` and the constraints set
+        // up there do not exist yet. Loading on demand keeps one code path
+        // instead of leaving the banner state to be fixed up later.
+        loadViewIfNeeded()
+
         partnerPane.refresh()
         usagePane.refresh()
         shopPane.refresh()
@@ -194,6 +200,9 @@ final class PopoverController: NSViewController {
     /// area gives up the room instead.
     private func setBannerVisible(_ visible: Bool) {
         banner.isHidden = !visible
+        // Defensive: these are built in `loadView`, and a caller that arrives
+        // before it should get a no-op rather than a crash.
+        guard isViewLoaded, bannerHeight != nil, containerTop != nil else { return }
         bannerHeight.isActive = !visible
         containerTop.constant = visible ? 8 : 0
         view.layoutSubtreeIfNeeded()
