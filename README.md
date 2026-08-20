@@ -90,9 +90,10 @@ are excluded, so the app never rewards you for wasting money.
 | Perfect | Ultimate | 3M |
 | Ultimate | Mega | 8M |
 
-Token spend varies by an order of magnitude between plans, so the curve has a
-**growth pace** under the gear: *Light use* halves every threshold, *Heavy use*
-triples them. The table above is the default.
+There is one curve and everybody walks it. Token spend does vary by an order of
+magnitude between plans, and the thresholds above are pitched at the middle of
+that — but a tamer who can halve or triple them decides for themselves what a
+stage is worth, and then two partners at the same rung have nothing in common.
 
 Reaching Mega is meant to be the *start* of the game, not the end of it — the
 collection and Jogress are the long haul.
@@ -150,8 +151,8 @@ prerequisite.
 - **Where your tokens went.** Agents record the directory they were working in,
   so the Usage tab breaks spend down by project. Anything touched today is
   highlighted; the rest is muted history.
-- **Launch at login**, growth pace, refresh interval, and every toggle above live
-  under the gear in the popover footer.
+- **Launch at login**, refresh interval, and every toggle above live under the
+  gear in the popover footer.
 
 ### Artwork clean-up
 

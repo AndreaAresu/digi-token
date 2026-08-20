@@ -295,21 +295,6 @@ final class PopoverController: NSViewController {
         menu.addItem(toggle("Launch at login", #selector(toggleLogin), settings.launchesAtLogin))
 
         menu.addItem(.separator())
-        let paceHeader = NSMenuItem(title: "Growth pace", action: nil, keyEquivalent: "")
-        paceHeader.isEnabled = false
-        menu.addItem(paceHeader)
-        for pace in GrowthPace.allCases {
-            let item = NSMenuItem(
-                title: "  \(pace.label)", action: #selector(pickPace(_:)), keyEquivalent: ""
-            )
-            item.target = self
-            item.representedObject = pace.rawValue
-            item.state = settings.growthPace == pace ? .on : .off
-            item.toolTip = "Mega at \(TokenFormatter.short(GrowthCurve.requirement(for: .ultimate, pace: pace))) billable tokens"
-            menu.addItem(item)
-        }
-
-        menu.addItem(.separator())
         let refresh = NSMenuItem(title: "Refresh every", action: nil, keyEquivalent: "")
         refresh.isEnabled = false
         menu.addItem(refresh)
@@ -398,17 +383,6 @@ final class PopoverController: NSViewController {
     @objc private func pickRefresh(_ sender: NSMenuItem) {
         guard let minutes = sender.representedObject as? Int else { return }
         Settings.shared.refreshMinutes = minutes
-    }
-
-    @objc private func pickPace(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String,
-              let pace = GrowthPace(rawValue: raw)
-        else { return }
-        Settings.shared.growthPace = pace
-        // Thresholds just moved under the current partner, so it may have earned
-        // rungs it had not a moment ago.
-        store.reevaluate()
-        refresh()
     }
 }
 

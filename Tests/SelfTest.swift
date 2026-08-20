@@ -63,8 +63,8 @@ enum SelfTest {
         section("Project breakdown")
         testProjectBreakdown()
 
-        section("Growth pace")
-        testGrowthPace()
+        section("Growth curve")
+        testGrowthCurve()
 
         section("Shop")
         testShop()
@@ -812,39 +812,41 @@ enum SelfTest {
         )
     }
 
-    static func testGrowthPace() {
-        let quick = GrowthCurve.requirement(for: .ultimate, pace: .quick)
-        let standard = GrowthCurve.requirement(for: .ultimate, pace: .standard)
-        let marathon = GrowthCurve.requirement(for: .ultimate, pace: .marathon)
+    static func testGrowthCurve() {
+        expect(
+            GrowthCurve.requirement(for: .ultimate) == 8_000_000,
+            "Mega sits at 8M billable"
+        )
 
-        expect(quick < standard && standard < marathon, "the paces are ordered")
-        expect(standard == 8_000_000, "Mega sits at 8M billable on the default pace")
-        expect(quick == 4_000_000, "light use halves it")
-
-        // Every rung must still be strictly increasing at every pace, or the
-        // ladder could grant two stages for the same token.
-        for pace in GrowthPace.allCases {
-            var previous = -1
-            var monotonic = true
-            for stage in DigiStage.allCases {
-                let value = GrowthCurve.requirement(for: stage, pace: pace)
-                if value <= previous && stage != .babyI { monotonic = false }
-                previous = value
-            }
-            expect(monotonic, "\(pace.label): thresholds increase at every rung")
+        // One curve for everyone. A tamer able to halve or triple it could
+        // decide what a stage meant, which is the whole point of not having the
+        // setting any more.
+        var previous = -1
+        var monotonic = true
+        for stage in DigiStage.allCases {
+            let value = GrowthCurve.requirement(for: stage)
+            if value <= previous { monotonic = false }
+            previous = value
         }
+        expect(monotonic, "thresholds increase at every rung")
 
-        // Progress has to stay inside 0...1 whatever the pace.
-        let progress = GrowthCurve.progress(tokens: 500_000, stage: .child, pace: .marathon)
-        expect((0...1).contains(progress), "progress stays bounded (\(progress))")
+        // Progress has to stay inside 0...1, including past the top rung.
+        let progress = GrowthCurve.progress(tokens: 500_000, stage: .child)
+        expect((0...1).contains(progress), "progress stays in range (\(progress))")
+        expect(
+            GrowthCurve.progress(tokens: 99_000_000, stage: .ultimate) == 1,
+            "the last rung reads as complete"
+        )
+        expect(
+            GrowthCurve.tokensToNext(tokens: 0, stage: .ultimate) == nil,
+            "there is nothing after the last rung"
+        )
+        expect(
+            GrowthCurve.tokensToNext(tokens: 300_000, stage: .child) == 700_000,
+            "the distance to the next rung is the gap between the two"
+        )
     }
 
-    /// The coach has to stay quiet at a tamer who is already working well.
-    ///
-    /// Thresholds were set against the real profile on the machine this was
-    /// written on — 97% cache share, 43x amortisation, a 400K median session —
-    /// and the point of pinning it here is that a future retune cannot start
-    /// nagging that tamer without a test going red.
     static func testCoach() {
         func event(
             model: String, session: String, key: String,

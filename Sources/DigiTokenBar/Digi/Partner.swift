@@ -75,48 +75,22 @@ struct Partner: Codable, Sendable, Identifiable, Hashable {
     var ageInDays: Int { Int(age / 86400) }
 }
 
-/// How fast the ladder should be walked.
-///
-/// Token spend varies by an order of magnitude between plans and working styles,
-/// so a single fixed curve is either unreachable for a light user or trivial for
-/// a heavy one. The pace is a multiplier on every threshold, and the tamer picks
-/// the one that matches how much they actually use their agent.
-enum GrowthPace: String, Codable, Sendable, CaseIterable {
-    /// A modest plan, or an agent used a few days a week.
-    case quick
-    /// The default. Roughly a month to Mega at a steady daily habit.
-    case standard
-    /// Heavy daily use, where the standard curve would be over in a week.
-    case marathon
-
-    var multiplier: Double {
-        switch self {
-        case .quick: 0.5
-        case .standard: 1
-        case .marathon: 3
-        }
-    }
-
-    var label: String {
-        switch self {
-        case .quick: "Light use"
-        case .standard: "Regular use"
-        case .marathon: "Heavy use"
-        }
-    }
-}
-
 /// Token cost of each rung.
 ///
 /// Growth runs on *billable* tokens, so the curve never rewards re-sending
 /// context you could have cached. The numbers below are set so that reaching
 /// Mega is the *start* of the game — the collection and Jogress are the long
 /// haul — rather than a months-long grind that most tamers never finish.
+///
+/// There is one curve and every tamer walks it. A speed setting turned the
+/// ladder into a number the tamer could dial, which is the one thing a V-Pet
+/// must not be: two partners at the same rung meant nothing in common, and
+/// "Heavy use" was there to be picked by anyone who wanted the climb to last.
+/// The middle setting was always the honest one, so it is now the only one.
 enum GrowthCurve {
     static let eggHatch = 20_000
 
-    /// Baseline thresholds at `GrowthPace.standard`.
-    private static func baseRequirement(for stage: DigiStage) -> Int {
+    static func requirement(for stage: DigiStage) -> Int {
         switch stage {
         case .babyI: 0
         case .babyII: 75_000
@@ -127,23 +101,19 @@ enum GrowthCurve {
         }
     }
 
-    static func requirement(for stage: DigiStage, pace: GrowthPace = .standard) -> Int {
-        Int((Double(baseRequirement(for: stage)) * pace.multiplier).rounded())
-    }
-
     /// Progress through the current rung, 0...1.
-    static func progress(tokens: Int, stage: DigiStage, pace: GrowthPace = .standard) -> Double {
+    static func progress(tokens: Int, stage: DigiStage) -> Double {
         guard let next = stage.next else { return 1 }
-        let floorValue = requirement(for: stage, pace: pace)
-        let ceilingValue = requirement(for: next, pace: pace)
+        let floorValue = requirement(for: stage)
+        let ceilingValue = requirement(for: next)
         guard ceilingValue > floorValue else { return 1 }
         let span = Double(ceilingValue - floorValue)
         return min(1, max(0, Double(tokens - floorValue) / span))
     }
 
-    static func tokensToNext(tokens: Int, stage: DigiStage, pace: GrowthPace = .standard) -> Int? {
+    static func tokensToNext(tokens: Int, stage: DigiStage) -> Int? {
         guard let next = stage.next else { return nil }
-        return max(0, requirement(for: next, pace: pace) - tokens)
+        return max(0, requirement(for: next) - tokens)
     }
 }
 
