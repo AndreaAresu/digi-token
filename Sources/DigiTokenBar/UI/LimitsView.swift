@@ -154,8 +154,7 @@ final class LimitsSection: NSView {
     /// that was is the difference between a reading and a claim — a percentage
     /// from three weeks ago describes three weeks ago.
     private static func staleness(of window: RateWindow) -> String? {
-        guard let observed = window.observedAt else { return nil }
-        guard Date().timeIntervalSince(observed) > 2 * 3600 else { return nil }
+        guard let observed = window.observedAt, window.isStale() else { return nil }
         return "as the tool last wrote it, \(relative.localizedString(for: observed, relativeTo: Date()))"
     }
 
