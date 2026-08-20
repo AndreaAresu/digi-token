@@ -356,6 +356,12 @@ final class PartnerStore {
     /// different reasons — the pane has to be able to say which one it was.
     @discardableResult
     func jogress(_ a: Partner, _ b: Partner) -> JogressResult {
+        guard a.id != b.id else { return .samePartner }
+        // Checked for both halves, the way the cross-tamer path checks the one
+        // it spends: a partner that is not in the collection cannot be consumed
+        // from it, and silently fusing it would invent an entry.
+        let held = Set(collection.map(\.id))
+        guard held.contains(a.id), held.contains(b.id) else { return .notInCollection }
         guard let result = Digivolution.jogress(a, b) else { return .noRoute }
         // Spent only once the fusion is known to be possible, and before either
         // partner is removed below.
@@ -389,6 +395,10 @@ final class PartnerStore {
     enum JogressResult: Equatable {
         case fused(String)
         case notInCollection
+        /// Both halves of a Jogress have to be different partners. Nothing in
+        /// the graph stops a form fusing with itself, but the collection would
+        /// lose one entry and gain one, which is not a fusion.
+        case samePartner
         case noRoute
         /// The fusion is possible, the meter is empty. Checked before anything
         /// is consumed, so a tamer never loses a partner to a failed Jogress.

@@ -171,8 +171,8 @@ scanning, the full growth ladder, care-driven branching, the X-Antibody roll,
 the DigiDex, idle animation, the floating pet, notifications, and Jogress in the
 model layer.
 
-Not built yet: localisation, a Jogress UI, and a screen for the collection —
-see [TODO.md](TODO.md) for the list, with what each one would take.
+Not built yet: localisation, accessibility labels, and a guard on the pricing
+table — see [TODO.md](TODO.md) for the list, with what each one would take.
 
 ## The shop
 
@@ -272,10 +272,25 @@ talk to each other, so the format is built for a chat window: it survives being
 wrapped across lines, and a checksum means a truncated paste is *refused* rather
 than silently decoding into a different partner.
 
-Fusing costs a **DNA Charge** and spends one of your own retired partners; the
-visitor is left untouched — their card is a photograph, not a transfer of
-custody, and nothing here reaches their machine. The outcome is seeded from both
-partners, so re-importing a card is not a way to reroll a form you did not like.
+## Your partners, and fusing two of them
+
+Graduating a partner moves it into **Your partners** on the Tamer tab: sprite,
+stage, what it cost to raise, and its whole lineage in the tooltip. It is the
+only screen where a retired partner can be looked at, which is the point — weeks
+of raising should not end in a counter.
+
+Picking two of them fuses them. Both are spent, the result takes their place,
+and it costs a DNA Charge. What they become is **not previewed**: the form is
+settled from both seeds at the moment it happens, and showing it first would
+turn a choice into a lookup. Every way the fusion can refuse — no charge, no
+route, the same partner twice, one no longer held — is checked before anything
+is consumed.
+
+Fusing across tamers costs a **DNA Charge** and spends one of your own retired
+partners; the visitor is left untouched — their card is a photograph, not a
+transfer of custody, and nothing here reaches their machine. The outcome is
+seeded from both partners, so re-importing a card is not a way to reroll a form
+you did not like.
 
 ## The DigiDex
 

@@ -5,33 +5,12 @@ rather than in issues so it travels with the code, and ordered by how much of
 the loop it closes rather than by how easy it is.
 
 Nothing on this list is a bug. The bugs get fixed; this is the shape of the
-thing that is not built yet.
+thing that is not built yet. Items leave the list when they ship rather than
+accumulating a "done" section — git remembers.
 
 ---
 
-## 1. The collection has no home — and no Jogress UI
-
-**The gap.** You raise a partner for weeks, take it to Mega, graduate it, and it
-disappears. `PartnerStore.collection` surfaces in exactly two places today: the
-`N raised` counter in the DigiDex header, and as titles inside an `NSPopUpButton`
-in a modal alert during a cross-tamer Jogress. The README says *"Mega is the
-start of the game — the collection and Jogress are the long haul"*, and the long
-haul has no screen.
-
-The twin gap is already declared in the README's own status line: **no Jogress
-UI**. `PartnerStore.jogress(_:_:)` fuses two of your own graduated partners,
-returns a proper `JogressResult`, is covered by tests — and is called by nothing.
-Fusing with a friend's card works; fusing two of your own does not.
-
-**What it would take.** A "Your partners" section in the Tamer tab, which is
-already where fusion lives. One card per retired partner: sprite, full lineage,
-tokens credited, date graduated. Selecting two of them fuses them, in place of
-the dropdown-inside-an-alert.
-
-Every field it needs is already persisted — `lineage`, `digivolutionDates`,
-`tokens`, `retiredAt` — and the cost model exists: a Jogress spends a DNA Charge.
-
-## 2. No accessibility labels anywhere
+## 1. No accessibility labels anywhere
 
 **The gap.** `grep -r "setAccessibility" Sources/` returns nothing. An app whose
 content is sprites and 7–9pt text is exactly the one a screen reader cannot
@@ -45,7 +24,7 @@ exist as tooltips in most cases.
 
 This is the only item here that is about someone who cannot use the app today.
 
-## 3. The pricing table fails silently
+## 2. The pricing table fails silently
 
 **The gap.** `ModelPricing.rate(for:)` matches the model id by substring and
 falls back to a Sonnet-shaped rate when nothing matches — without telling
