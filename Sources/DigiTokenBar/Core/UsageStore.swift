@@ -5,6 +5,11 @@ enum UsageAggregator {
     /// Length of the rolling rate-limit window both Claude and Codex meter on.
     static let blockDuration: TimeInterval = 5 * 3600
 
+    /// How many days the recent-activity chart covers. A fortnight is long
+    /// enough to show a rhythm and short enough that each bar is still readable
+    /// in a 340-point popover.
+    static let recentDayCount = 14
+
     /// Groups events into 5-hour blocks.
     ///
     /// A block opens at the top of the hour containing its first event, and
@@ -82,10 +87,13 @@ enum UsageAggregator {
         // cache still remembers one by one — the archive keeps totals, not
         // shapes. Retention outlasts a quarter, which is plenty of weeks.
         var perWeek: [Date: Int] = [:]
+        var perDay: [Date: Int] = [:]
 
         for event in events {
             usage.allTime += event.counts
-            days.insert(calendar.startOfDay(for: event.timestamp))
+            let day = calendar.startOfDay(for: event.timestamp)
+            days.insert(day)
+            perDay[day, default: 0] += event.counts.billable
             sessions.insert(event.sessionID)
 
             if let project = event.project {
@@ -138,6 +146,14 @@ enum UsageAggregator {
         // that actually happened, and it is labelled as such.
         usage.peakBlock = allBlocks.map(\.counts.billable).max() ?? 0
         usage.peakWeek = perWeek.values.max() ?? 0
+
+        // Every day in the span, not only the worked ones — a chart whose x axis
+        // skips the quiet days is not a chart of time.
+        let today = calendar.startOfDay(for: now)
+        usage.recentDays = (0..<recentDayCount).reversed().compactMap { offset in
+            guard let date = calendar.date(byAdding: .day, value: -offset, to: today) else { return nil }
+            return DayUsage(date: date, billable: perDay[date] ?? 0)
+        }
         return usage
     }
 

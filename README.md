@@ -217,6 +217,15 @@ direction and then watching the roll ignore you would be the worst of both
 designs. It is only spent when the rung can actually honour it — many early
 stages carry no field data, and a purchase should not evaporate on one of them.
 
+## The last fortnight
+
+One bar per day, quiet days included. It used to be one bar per five-hour window
+of work, which read as a time series and was not one: a window only exists on a
+day you worked, so two neighbouring bars could be five hours or five days apart,
+and a fortnight off collapsed to nothing. Days have a real axis — the gaps are
+drawn as gaps, today is the highlighted bar, and each one names its date and
+total on hover.
+
 ## Limits, and what can honestly be said about them
 
 The question this section exists to answer is "how much have I got left", and
@@ -250,21 +259,50 @@ figure six hours old describes a window that no longer exists; a weekly figure
 two days old is still about this week. The age is printed beside the gauge once
 it exceeds a tenth of the window.
 
-Deriving the reset time from the samples was tried and rejected. A drop in
-utilisation marks a rollover, so the window should end five hours later — but on
-this machine the last rollover ran 100% → 0% at 04:23, putting the end at 09:23
-while Claude itself reported it resetting at about 13:58. Whatever that
-allowance is measured over, it is not a fixed block from the last reset, so the
-app does not claim to know when it ends.
+### When a window turns over
+
+Neither figure comes with a reset time attached, and the two windows need
+different reasoning to get one. Both are marked with a `~`, because both are
+worked out rather than reported.
+
+The **five-hour** window is anchored to when you first used it, and the samples
+show that happening: utilisation sitting at zero and then rising is the first
+use inside a fresh window, so five hours from there is when it ends. The
+crossing is bracketed by two samples a quarter of an hour apart, so the midpoint
+is taken. Against this machine it gave 13:54 where Claude itself said 13:58.
+
+What does *not* work — tried, measured, thrown away — is taking the last
+rollover (100% → 0%) and adding five hours. That gave 09:23 against a real
+13:58, because a window does not start when the previous one expires; it starts
+at the next thing you do.
+
+The **weekly** window is on a fixed schedule instead, so it is derived the other
+way: the last reset the CLI cached, however stale, still gives the weekday and
+the hour, and is rolled forward by whole weeks. A copy cached on 4 August said
+Saturday 03:00; rolled forward it says Saturday 22 August 03:00, and Claude's
+panel says "Resets Sat 2:59 AM". Applying the five-hour reasoning here instead
+was out by a day and a half.
+
+A `~` reset is shown but never used to decide whether a reading still counts. An
+estimate ten minutes early would otherwise blank a perfectly good gauge.
+
+The window card above the gauges uses the same reset once there is one, so the
+panel keeps a single clock. Its own five-hour block is measured from these logs
+alone, and the allowance covers Claude usage this app never sees.
 
 The transcripts carry one further signal: when a limit actually stops a turn,
 Claude Code records the window type and when it clears. While such a refusal is
 still in force the pane shows it as the full bar it is.
 
-What is offered instead, for both tools, is a **comparison against your own
-record**: this window against the busiest window on file, this week against the
-busiest week. It is labelled as a high-water mark rather than a limit, because
-that is what it is — something that happened, not something you are entitled to.
+When a tool has told us nothing — Codex not run for weeks, a CLI-only setup
+whose cache has gone stale — the section falls back to a **comparison against
+your own record**: this window against the busiest window on file, this week
+against the busiest week, labelled a high-water mark rather than a limit.
+
+That comparison is a fallback and not a companion. Beside a real gauge it reads
+as a second allowance — "1.1M of 1.2M busiest" looks like 92% of something you
+are entitled to, and it is 92% of a personal best — so it gives way as soon as
+there is a measured figure to show.
 
 The alternative was to guess a quota from the plan tier and show a confident
 bar against it. Every number in this app is one you can check; a bar against an

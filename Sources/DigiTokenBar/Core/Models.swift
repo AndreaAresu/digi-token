@@ -102,6 +102,11 @@ struct RateWindow: Sendable, Hashable, Codable {
     /// When the tool wrote this down. A gauge is only as current as its record,
     /// and saying so is the difference between a reading and a guess.
     var observedAt: Date?
+    /// True when the reset time was worked out rather than reported — it is
+    /// shown with a "~" and, crucially, is never used to decide whether the
+    /// reading still counts. A derived time that is ten minutes early would
+    /// otherwise blank a perfectly good gauge.
+    var resetIsApproximate = false
     /// A name from the tool where it knows a better one than the window length
     /// gives — a weekly limit that applies to one model only, say. Naming stays
     /// with the provider so the pane never has to know whose window it is.
@@ -110,8 +115,9 @@ struct RateWindow: Sendable, Hashable, Codable {
     init(
         kind: String, usedFraction: Double? = nil, minutes: Int? = nil,
         resetsAt: Date? = nil, blocked: Bool = false, observedAt: Date? = nil,
-        title: String? = nil
+        title: String? = nil, resetIsApproximate: Bool = false
     ) {
+        self.resetIsApproximate = resetIsApproximate
         self.kind = kind
         self.usedFraction = usedFraction
         self.minutes = minutes
@@ -132,6 +138,7 @@ struct RateWindow: Sendable, Hashable, Codable {
         blocked = try c.decodeIfPresent(Bool.self, forKey: .blocked) ?? false
         observedAt = try c.decodeIfPresent(Date.self, forKey: .observedAt)
         title = try c.decodeIfPresent(String.self, forKey: .title)
+        resetIsApproximate = try c.decodeIfPresent(Bool.self, forKey: .resetIsApproximate) ?? false
     }
 
     /// A name for the window, taken from its length where the tool gave one so
@@ -155,7 +162,7 @@ struct RateWindow: Sendable, Hashable, Codable {
     /// figure written six hours ago describes a window that no longer exists,
     /// and drawing it would be worse than drawing nothing.
     func isCurrent(now: Date = Date()) -> Bool {
-        if let resetsAt { return resetsAt > now }
+        if let resetsAt, !resetIsApproximate { return resetsAt > now }
         guard let observedAt, let minutes else { return true }
         return now.timeIntervalSince(observedAt) < Double(minutes) * 60
     }
@@ -173,6 +180,18 @@ struct RateWindow: Sendable, Hashable, Codable {
         let window = Double(minutes ?? 300) * 60
         return age > max(window / 10, 15 * 60)
     }
+}
+
+/// One calendar day of work, including the empty ones.
+///
+/// The chart that reads these needs the gaps: a week off is part of the shape,
+/// and a series that only carries the days you worked draws a straight line
+/// through a fortnight of silence.
+struct DayUsage: Sendable, Hashable, Identifiable {
+    let date: Date
+    var billable: Int
+
+    var id: Date { date }
 }
 
 /// Where a slice of the tokens went. Agents record the directory they were
@@ -211,6 +230,8 @@ struct ProviderUsage: Sendable {
     var peakBlock = 0
     /// The busiest calendar week on record, same reasoning.
     var peakWeek = 0
+    /// The last fortnight, oldest first, empty days included.
+    var recentDays: [DayUsage] = []
 }
 
 /// The aggregate the UI and the partner engine both read.
