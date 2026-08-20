@@ -59,6 +59,13 @@ struct ClaudeCodeProvider: UsageProvider {
         return files
     }
 
+    func backfillLimits(cache: ScanCache) {
+        let files = Self.projectRoots().flatMap { Self.transcripts(in: $0) }
+        scanRecentTails(of: files) { line in
+            if let window = Self.rateWindow(in: line) { cache.recordLimit(window) }
+        }
+    }
+
     private func scanFile(_ url: URL, cache: ScanCache) -> [UsageEvent] {
         let path = url.path
         let cached = cache.cachedEvents(for: path)
@@ -71,6 +78,7 @@ struct ClaudeCodeProvider: UsageProvider {
 
         var fresh: [UsageEvent] = []
         let end = JSONLReader.stream(path: path, from: start) { line in
+            if let window = Self.rateWindow(in: line) { cache.recordLimit(window) }
             guard let event = Self.parse(line: line, fallbackSession: url.deletingPathExtension().lastPathComponent)
             else { return }
             fresh.append(event)
@@ -78,6 +86,49 @@ struct ClaudeCodeProvider: UsageProvider {
 
         cache.record(path: path, offset: end, newEvents: fresh)
         return base + fresh
+    }
+
+    /// Claude Code records `quotaLimits` at the moment a limit actually stops a
+    /// turn — the type of window, and when it clears.
+    ///
+    /// It is an event, not a gauge: unlike Codex, nothing in these logs says how
+    /// much of the allowance is left while there is still some left. That is the
+    /// honest shape of what is available, and the pane shows a refusal and its
+    /// reset time rather than inventing a percentage to sit beside it.
+    static func rateWindow(in line: Data) -> RateWindow? {
+        guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+              let quota = object["quotaLimits"] as? [String: Any],
+              let kind = quota["rateLimitType"] as? String
+        else { return nil }
+
+        let resets = (quota["resetsAt"] as? Double).map { Date(timeIntervalSince1970: $0) }
+            ?? (quota["resetsAt"] as? Int).map { Date(timeIntervalSince1970: Double($0)) }
+        let observed = (object["timestamp"] as? String).flatMap(TimestampParser.parse)
+
+        // Only a refusal is worth recording. A record saying the request went
+        // through says nothing about how close to the edge it was.
+        let status = (quota["status"] as? String) ?? "rejected"
+        guard status != "allowed" else { return nil }
+
+        return RateWindow(
+            kind: kind,
+            usedFraction: nil,
+            minutes: Self.windowMinutes(for: kind),
+            resetsAt: resets,
+            blocked: true,
+            observedAt: observed
+        )
+    }
+
+    /// The window lengths Claude Code names, so the pane can call a `five_hour`
+    /// limit a five-hour limit without every reader having to know the spelling.
+    private static func windowMinutes(for kind: String) -> Int? {
+        switch kind {
+        case "five_hour": 300
+        case "seven_day", "weekly": 10_080
+        case "daily": 1_440
+        default: nil
+        }
     }
 
     static func parse(line: Data, fallbackSession: String) -> UsageEvent? {

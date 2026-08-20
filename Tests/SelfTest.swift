@@ -78,6 +78,9 @@ enum SelfTest {
         section("Tamer cards")
         await testTamerCards()
 
+        section("Rate limits")
+        testRateLimits()
+
         section("Rarity stars")
         testRarityStars()
 
@@ -1287,6 +1290,116 @@ enum SelfTest {
 
     /// Rarity is a description of the evolution graph, not a balance knob, so
     /// what is pinned here is that it keeps describing the graph.
+    /// What the tools say about their own limits, and what the app is allowed to
+    /// say when they say nothing.
+    static func testRateLimits() {
+        // Codex writes its rate-limit state onto every token_count event. This
+        // is the real shape, taken from a log on this machine.
+        let codexLine = """
+        {"timestamp":"2026-08-19T10:00:00.000Z","type":"event_msg","payload":{"type":"token_count",\
+        "info":{"total_token_usage":{"input_tokens":10},"last_token_usage":{"input_tokens":10,\
+        "output_tokens":5},"model_context_window":272000},\
+        "rate_limits":{"limit_id":"codex","primary":{"used_percent":26.0,"window_minutes":43200,\
+        "resets_at":1787393158},"secondary":{"used_percent":80.5,"window_minutes":10080,\
+        "resets_at":1787000000}}}}
+        """
+        let windows = CodexProvider.rateWindows(in: Data(codexLine.utf8))
+        expect(windows.count == 2, "both windows are read (\(windows.count))")
+        guard let monthly = windows.first, let weekly = windows.last, windows.count == 2 else {
+            expect(false, "the codex windows parsed")
+            return
+        }
+        expect(monthly.usedFraction == 0.26, "the gauge is the tool's own percentage")
+        expect(monthly.minutes == 43_200, "the window length survives")
+        expect(monthly.label == "30-day limit", "a window is named from its length (\(monthly.label))")
+        expect(weekly.label == "weekly limit", "a 10080-minute window is a weekly one")
+        expect(
+            weekly.usedFraction.map { $0 > 0.8 && $0 < 0.81 } ?? false,
+            "a fractional percentage is not rounded away"
+        )
+        expect(monthly.observedAt != nil, "the reading carries when it was written")
+        expect(!monthly.blocked, "under 100% is not blocked")
+        expect(
+            monthly.kind != weekly.kind,
+            "two windows from one record are told apart, or one would overwrite the other"
+        )
+
+        // A turn with no rate-limit block must not invent one.
+        let plain = #"{"timestamp":"2026-08-19T10:00:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{}}}"#
+        expect(
+            CodexProvider.rateWindows(in: Data(plain.utf8)).isEmpty,
+            "a record without rate limits yields no window"
+        )
+
+        // Claude Code writes nothing until a limit actually stops a turn, and
+        // then it is a refusal rather than a gauge. This is the real shape.
+        let claudeLine = """
+        {"type":"assistant","timestamp":"2026-08-19T19:47:37.782Z","quotaLimits":\
+        {"status":"rejected","resetsAt":1787174400,"rateLimitType":"five_hour",\
+        "isUsingOverage":false}}
+        """
+        guard let hit = ClaudeCodeProvider.rateWindow(in: Data(claudeLine.utf8)) else {
+            expect(false, "a Claude Code refusal is read")
+            return
+        }
+        expect(hit.blocked, "a refusal is recorded as blocked")
+        expect(hit.usedFraction == nil, "no percentage is invented where the tool reports none")
+        expect(hit.minutes == 300, "five_hour is five hours")
+        expect(hit.label == "5-hour limit", "and reads as one (\(hit.label))")
+        expect(hit.resetsAt != nil, "the reset time survives")
+        expect(
+            !hit.isCurrent(now: Date(timeIntervalSince1970: 1_787_174_400 + 60)),
+            "a window that has already reset is not current"
+        )
+        expect(
+            hit.isCurrent(now: Date(timeIntervalSince1970: 1_787_174_400 - 60)),
+            "and is current until it does"
+        )
+
+        let allowed = #"{"type":"assistant","quotaLimits":{"status":"allowed","rateLimitType":"five_hour"}}"#
+        expect(
+            ClaudeCodeProvider.rateWindow(in: Data(allowed.utf8)) == nil,
+            "a request that went through says nothing about how close the limit was"
+        )
+
+        // The cache is where a reading lives between refreshes, because the scan
+        // is incremental and a quiet refresh reads no records at all.
+        let url = URL(fileURLWithPath: NSTemporaryDirectory() + "digitest-limits-\(UUID()).json")
+        let cache = ScanCache(url: url)
+        cache.recordLimit(RateWindow(
+            kind: "codex_43200", usedFraction: 0.1, minutes: 43_200,
+            observedAt: Date(timeIntervalSince1970: 1_000)
+        ))
+        cache.recordLimit(RateWindow(
+            kind: "codex_43200", usedFraction: 0.5, minutes: 43_200,
+            observedAt: Date(timeIntervalSince1970: 2_000)
+        ))
+        cache.recordLimit(RateWindow(
+            kind: "codex_43200", usedFraction: 0.2, minutes: 43_200,
+            observedAt: Date(timeIntervalSince1970: 1_500)
+        ))
+        expect(cache.knownLimits.count == 1, "one window per kind, not one per reading")
+        expect(cache.knownLimits.first?.usedFraction == 0.5, "the newest reading wins")
+        cache.persist()
+        expect(
+            ScanCache(url: url).knownLimits.first?.usedFraction == 0.5,
+            "the reading survives a relaunch"
+        )
+
+        // And a cache written before any of this existed still decodes: the
+        // archive of everything past the retention window lives in the same
+        // file, and that is the tamer's all-time total.
+        let legacy = URL(fileURLWithPath: NSTemporaryDirectory() + "digitest-legacy-\(UUID()).json")
+        let old = #"{"files":{"/tmp/a.jsonl":{"offset":10,"size":10,"modified":0}},"events":{}}"#
+        try? Data(old.utf8).write(to: legacy)
+        let reopened = ScanCache(url: legacy)
+        expect(reopened.knownLimits.isEmpty, "a cache from before limits existed still opens")
+        expect(
+            reopened.resumeOffset(for: "/tmp/a.jsonl") == 0 || reopened.archive.eventCount == 0,
+            "and its file state is intact"
+        )
+    }
+
     /// The stars are a second reading of the route count, so what has to be
     /// pinned is that they cannot say anything the count does not.
     static func testRarityStars() {
@@ -1576,6 +1689,7 @@ enum SelfTest {
     static func testRealLogs() async {
         var found = false
         var allEvents: [UsageEvent] = []
+        var summaries: [ProviderUsage] = []
 
         for provider in [ClaudeCodeProvider() as any UsageProvider, CodexProvider()] {
             // A fresh cache each run, so the timings below measure a real cold
@@ -1600,6 +1714,7 @@ enum SelfTest {
             allEvents.append(contentsOf: events)
 
             let usage = UsageAggregator.summarize(provider: provider.id, events: events)
+            summaries.append(usage)
             print("""
                   \(provider.id.displayName): \(events.count) events, \
                   \(TokenFormatter.short(usage.allTime.billable)) billable, \
@@ -1641,6 +1756,21 @@ enum SelfTest {
         if !found {
             print("  (no local AI-tool logs found — parser checks above still ran)")
             return
+        }
+
+        // The pace bars compare against a high-water mark, so the mark has to
+        // actually be one: nothing this week can exceed the busiest week, and
+        // nothing in the open window can exceed the busiest window.
+        for usage in summaries {
+            expect(
+                usage.peakWeek >= usage.week.billable,
+                "\(usage.provider.displayName): the busiest week is not below this week "
+                    + "(\(TokenFormatter.short(usage.peakWeek)) vs \(TokenFormatter.short(usage.week.billable)))"
+            )
+            expect(
+                usage.peakBlock >= (usage.currentBlock?.counts.billable ?? 0),
+                "\(usage.provider.displayName): the busiest window is not below the open one"
+            )
         }
 
         // Every model this machine has actually used has to be in the price

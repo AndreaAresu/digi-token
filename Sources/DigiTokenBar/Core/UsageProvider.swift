@@ -16,6 +16,45 @@ protocol UsageProvider: Sendable {
     /// folded into `cache.archive`. Implementations use `ScanCache` so repeated
     /// calls only read the bytes appended since last time.
     func scan(cache: ScanCache) -> [UsageEvent]
+
+    /// Looks for what the tool says about its own rate limits, without touching
+    /// the event scan's offsets.
+    ///
+    /// Only called when the cache has never seen one. Scanning is incremental,
+    /// so a build that starts reading a new kind of record would otherwise show
+    /// nothing at all until the tool happened to write another — days, for a
+    /// record that only appears when a limit is actually hit.
+    func backfillLimits(cache: ScanCache)
+}
+
+extension UsageProvider {
+    /// Reads the tail of the most recently written logs and hands every line to
+    /// `handler`.
+    ///
+    /// Bounded on purpose: this runs outside the incremental scan, so it pays
+    /// for itself only if it stays cheap. A rate-limit reading older than the
+    /// last few megabytes of transcript has been superseded or has already
+    /// reset, which makes the tail the only part worth reading.
+    func scanRecentTails(
+        of files: [URL], newest: Int = 8, bytes: UInt64 = 512 * 1024,
+        handler: (Data) -> Void
+    ) {
+        let recent = files
+            .map { url -> (URL, Date, UInt64) in
+                let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+                return (
+                    url,
+                    (attrs?[.modificationDate] as? Date) ?? .distantPast,
+                    (attrs?[.size] as? NSNumber)?.uint64Value ?? 0
+                )
+            }
+            .sorted { $0.1 > $1.1 }
+            .prefix(newest)
+
+        for (url, _, size) in recent {
+            JSONLReader.stream(path: url.path, from: size > bytes ? size - bytes : 0, handler: handler)
+        }
+    }
 }
 
 /// Everything the aggregator still needs about events too old to keep one by one.
@@ -144,11 +183,30 @@ final class ScanCache: @unchecked Sendable {
     private struct Payload: Codable {
         var files: [String: FileState]
         var events: [String: [StoredEvent]]
+        var limits: [RateWindow] = []
+
+        init(files: [String: FileState], events: [String: [StoredEvent]], limits: [RateWindow]) {
+            self.files = files
+            self.events = events
+            self.limits = limits
+        }
+
+        /// Decoded field by field like everything else that is persisted here.
+        /// A cache that fails to decode is not merely a rescan: the archive of
+        /// everything older than the retention window lives in it, and that is
+        /// the tamer's all-time total.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            files = try c.decodeIfPresent([String: FileState].self, forKey: .files) ?? [:]
+            events = try c.decodeIfPresent([String: [StoredEvent]].self, forKey: .events) ?? [:]
+            limits = try c.decodeIfPresent([RateWindow].self, forKey: .limits) ?? []
+        }
     }
 
     private let lock = NSLock()
     private var files: [String: FileState] = [:]
     private var events: [String: [StoredEvent]] = [:]
+    private var limits: [RateWindow] = []
     private let url: URL
     private let calendar: Calendar
 
@@ -160,6 +218,30 @@ final class ScanCache: @unchecked Sendable {
         else { return }
         files = payload.files
         events = payload.events
+        limits = payload.limits
+    }
+
+    /// The last thing each tool said about each of its rate-limit windows.
+    ///
+    /// Kept in the cache rather than recomputed, because scanning is incremental:
+    /// a refresh that finds no new bytes reads no records, and the reading from
+    /// an hour ago is still the most recent one the tool wrote.
+    var knownLimits: [RateWindow] {
+        lock.lock(); defer { lock.unlock() }
+        return limits.sorted { ($0.minutes ?? .max) < ($1.minutes ?? .max) }
+    }
+
+    /// Records a window, newest observation per kind winning.
+    func recordLimit(_ window: RateWindow) {
+        lock.lock(); defer { lock.unlock() }
+        if let index = limits.firstIndex(where: { $0.kind == window.kind }) {
+            let existing = limits[index]
+            let isNewer = (window.observedAt ?? .distantPast) >= (existing.observedAt ?? .distantPast)
+            guard isNewer else { return }
+            limits[index] = window
+        } else {
+            limits.append(window)
+        }
     }
 
     /// Aggregated totals for everything older than the retention window.
@@ -270,7 +352,7 @@ final class ScanCache: @unchecked Sendable {
 
     func persist() {
         lock.lock()
-        let payload = Payload(files: files, events: events)
+        let payload = Payload(files: files, events: events, limits: limits)
         lock.unlock()
         guard let data = try? JSONEncoder().encode(payload) else { return }
         try? FileManager.default.createDirectory(

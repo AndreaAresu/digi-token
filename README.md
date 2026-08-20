@@ -217,6 +217,37 @@ direction and then watching the roll ignore you would be the worst of both
 designs. It is only spent when the rung can actually honour it — many early
 stages carry no field data, and a purchase should not evaporate on one of them.
 
+## Limits, and what can honestly be said about them
+
+The question this section exists to answer is "how much have I got left", and
+the answer differs by tool because what the tools write down differs.
+
+**Codex writes its own rate-limit state onto every turn** — how much of each
+window is used, how long the window is, when it rolls over. That is a reading,
+so it is shown as a gauge, with the time the tool wrote it whenever that is more
+than a couple of hours ago. A percentage from three weeks ago describes three
+weeks ago, and says so.
+
+**Claude Code writes nothing until a limit actually stops a turn.** Then it
+records the type of window and when it clears — a refusal, not a gauge. There is
+no allowance in those logs for a percentage to be a percentage *of*, so none is
+shown. When a refusal is still in force the pane says so and gives the reset
+time; otherwise the section says plainly that this tool records no allowance.
+
+What is offered instead, for both tools, is a **comparison against your own
+record**: this window against the busiest window on file, this week against the
+busiest week. It is labelled as a high-water mark rather than a limit, because
+that is what it is — something that happened, not something you are entitled to.
+
+The alternative was to guess a quota from the plan tier and show a confident
+bar against it. Every number in this app is one you can check; a bar against an
+invented ceiling is not.
+
+Readings are kept in the scan cache. Scanning is incremental, so a refresh that
+finds no new bytes reads no records, and the tool's last reading is still its
+last reading. When the cache has never seen one — an app that only just learned
+to look — each provider reads the tail of its most recent logs once to catch up.
+
 ## The coach
 
 A section in the Usage tab that reads the same events the partner grows on and

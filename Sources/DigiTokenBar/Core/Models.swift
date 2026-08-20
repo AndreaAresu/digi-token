@@ -81,6 +81,72 @@ struct UsageBlock: Sendable, Hashable {
     }
 }
 
+/// A rate-limit window, exactly as the tool itself recorded it.
+///
+/// Nothing here is derived from token counts. Neither tool publishes its quota
+/// in tokens, so a "78% of your limit" the app worked out for itself would be a
+/// number nobody could check — which is the one thing this app does not do. A
+/// window appears only when the tool wrote it down, and stays absent otherwise.
+struct RateWindow: Sendable, Hashable, Codable {
+    /// How the tool names it — `five_hour`, `weekly`, and so on.
+    var kind: String
+    /// Share of the allowance used, 0...1, when the tool reports a gauge.
+    var usedFraction: Double?
+    /// Window length in minutes, when reported.
+    var minutes: Int?
+    /// When the window rolls over.
+    var resetsAt: Date?
+    /// True when this is a refusal the tool recorded rather than a gauge —
+    /// the limit was actually hit, not merely approached.
+    var blocked = false
+    /// When the tool wrote this down. A gauge is only as current as its record,
+    /// and saying so is the difference between a reading and a guess.
+    var observedAt: Date?
+
+    init(
+        kind: String, usedFraction: Double? = nil, minutes: Int? = nil,
+        resetsAt: Date? = nil, blocked: Bool = false, observedAt: Date? = nil
+    ) {
+        self.kind = kind
+        self.usedFraction = usedFraction
+        self.minutes = minutes
+        self.resetsAt = resetsAt
+        self.blocked = blocked
+        self.observedAt = observedAt
+    }
+
+    /// Decoded field by field: this is persisted in the scan cache, and a cache
+    /// that will not decode takes the all-time archive down with it.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? ""
+        usedFraction = try c.decodeIfPresent(Double.self, forKey: .usedFraction)
+        minutes = try c.decodeIfPresent(Int.self, forKey: .minutes)
+        resetsAt = try c.decodeIfPresent(Date.self, forKey: .resetsAt)
+        blocked = try c.decodeIfPresent(Bool.self, forKey: .blocked) ?? false
+        observedAt = try c.decodeIfPresent(Date.self, forKey: .observedAt)
+    }
+
+    /// A name for the window, taken from its length where the tool gave one so
+    /// that a tool naming a window differently still reads correctly.
+    var label: String {
+        switch minutes {
+        case .some(let m) where m <= 60: "\(m)-minute limit"
+        case .some(let m) where m < 1_440: "\(m / 60)-hour limit"
+        case .some(let m) where m == 1_440: "daily limit"
+        case .some(let m) where m == 10_080: "weekly limit"
+        case .some(let m): "\(m / 1_440)-day limit"
+        case nil: kind.replacingOccurrences(of: "_", with: " ") + " limit"
+        }
+    }
+
+    /// Whether the window it describes has not already rolled over.
+    func isCurrent(now: Date = Date()) -> Bool {
+        guard let resetsAt else { return true }
+        return resetsAt > now
+    }
+}
+
 /// Where a slice of the tokens went. Agents record the directory they were
 /// working in, so "which repo is costing me" is answerable from data we already
 /// read — it just was not being shown anywhere.
@@ -110,6 +176,13 @@ struct ProviderUsage: Sendable {
     var lastActivity: Date?
     /// Biggest consumers first.
     var projects: [ProjectUsage] = []
+    /// What the tool last said about its own rate limits, if anything.
+    var limits: [RateWindow] = []
+    /// The busiest 5-hour window on record, which is the only ceiling the app
+    /// can honestly compare today against: it is something that happened.
+    var peakBlock = 0
+    /// The busiest calendar week on record, same reasoning.
+    var peakWeek = 0
 }
 
 /// The aggregate the UI and the partner engine both read.

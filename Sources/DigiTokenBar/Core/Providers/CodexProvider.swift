@@ -44,6 +44,23 @@ struct CodexProvider: UsageProvider {
         return events
     }
 
+    func backfillLimits(cache: ScanCache) {
+        var files: [URL] = []
+        for root in Self.sessionRoots() {
+            guard let walker = FileManager.default.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) else { continue }
+            for case let url as URL in walker where url.pathExtension == "jsonl" {
+                files.append(url)
+            }
+        }
+        scanRecentTails(of: files) { line in
+            for window in Self.rateWindows(in: line) { cache.recordLimit(window) }
+        }
+    }
+
     private func scanFile(_ url: URL, cache: ScanCache) -> [UsageEvent] {
         let path = url.path
         let cached = cache.cachedEvents(for: path)
@@ -65,6 +82,7 @@ struct CodexProvider: UsageProvider {
         var project = cache.projectHint(for: path)
 
         let end = JSONLReader.stream(path: path, from: start) { line in
+            for window in Self.rateWindows(in: line) { cache.recordLimit(window) }
             if let directory = Self.workingDirectory(in: line) {
                 project = URL(fileURLWithPath: directory).lastPathComponent
                 if let project { cache.setProjectHint(project, for: path) }
@@ -97,6 +115,43 @@ struct CodexProvider: UsageProvider {
         }
         if let cwd = object["cwd"] as? String, !cwd.isEmpty { return cwd }
         return nil
+    }
+
+    /// Codex writes its own rate-limit state onto every `token_count` event:
+    /// how much of each window is used, how long the window is, and when it
+    /// rolls over. It is the tool's own reading, so the app can show a real
+    /// gauge here rather than an estimate.
+    ///
+    /// `primary` and `secondary` are whatever the account has — a monthly
+    /// allowance, a weekly one, both — so they are read positionally and named
+    /// from `window_minutes` rather than assumed.
+    static func rateWindows(in line: Data) -> [RateWindow] {
+        guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+              let payload = object["payload"] as? [String: Any],
+              let info = payload["info"] as? [String: Any] ?? payload as [String: Any]?,
+              let limits = (info["rate_limits"] ?? payload["rate_limits"]) as? [String: Any]
+        else { return [] }
+
+        let observed = (object["timestamp"] as? String).flatMap(TimestampParser.parse)
+
+        return ["primary", "secondary"].compactMap { slot -> RateWindow? in
+            guard let window = limits[slot] as? [String: Any] else { return nil }
+            let minutes = window["window_minutes"] as? Int
+            // The kind has to be stable across observations or the cache would
+            // keep two rows for the same window; the length is what identifies
+            // it, with the slot as a fallback when the tool omits it.
+            let kind = minutes.map { "codex_\($0)" } ?? "codex_\(slot)"
+            guard let percent = window["used_percent"] as? Double else { return nil }
+            return RateWindow(
+                kind: kind,
+                usedFraction: max(0, min(1, percent / 100)),
+                minutes: minutes,
+                resetsAt: (window["resets_at"] as? Double).map { Date(timeIntervalSince1970: $0) }
+                    ?? (window["resets_at"] as? Int).map { Date(timeIntervalSince1970: Double($0)) },
+                blocked: percent >= 100,
+                observedAt: observed
+            )
+        }
     }
 
     static func parse(line: Data, session: String, sequence: Int, path: String) -> UsageEvent? {
