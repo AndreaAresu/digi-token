@@ -183,13 +183,7 @@ final class PopoverController: NSViewController {
         dexPane.refresh()
         tamerPane.refresh()
 
-        if let last = monitor.lastRefresh {
-            let formatter = RelativeDateTimeFormatter()
-            formatter.unitsStyle = .abbreviated
-            statusLabel.stringValue = "updated \(formatter.localizedString(for: last, relativeTo: Date()))"
-        } else {
-            statusLabel.stringValue = monitor.isRefreshing ? "scanning…" : ""
-        }
+        updateStatusLabel()
 
         if let event = store.pendingEvent {
             banner.present(event) { [weak self] in
@@ -200,6 +194,56 @@ final class PopoverController: NSViewController {
         } else {
             setBannerVisible(false)
         }
+    }
+
+    /// The footer clock, on its own so the tick below can move it without
+    /// rebuilding every pane.
+    ///
+    /// A scan that finished a moment ago is "just now", not "in 0 sec".
+    /// `RelativeDateTimeFormatter` phrases anything under half a second as the
+    /// future, and since a refresh is followed immediately by a redraw that was
+    /// the only thing this label ever said.
+    private func updateStatusLabel() {
+        guard let last = monitor.lastRefresh else {
+            statusLabel.stringValue = monitor.isRefreshing ? "scanning…" : ""
+            return
+        }
+        if monitor.isRefreshing {
+            statusLabel.stringValue = "scanning…"
+            return
+        }
+        let age = Date().timeIntervalSince(last)
+        guard age >= 45 else {
+            statusLabel.stringValue = "updated just now"
+            return
+        }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        statusLabel.stringValue = "updated \(formatter.localizedString(for: last, relativeTo: Date()))"
+    }
+
+    // MARK: - Visible lifetime
+
+    /// Ticks the footer clock while the popover is on screen.
+    ///
+    /// Nothing else redraws it: the scan runs on its own timer and the panes are
+    /// only rebuilt when the tamer does something, so without this the age of
+    /// the reading is frozen at whatever it was when the popover opened.
+    private var clock: Timer?
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        updateStatusLabel()
+        clock?.invalidate()
+        clock = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.updateStatusLabel() }
+        }
+    }
+
+    override func viewDidDisappear() {
+        super.viewDidDisappear()
+        clock?.invalidate()
+        clock = nil
     }
 
     /// Shows or hides the banner by giving it space rather than by floating it
