@@ -1362,6 +1362,73 @@ enum SelfTest {
             "a request that went through says nothing about how close the limit was"
         )
 
+        // Claude Code caches what `/usage` reports in ~/.claude.json. This is the
+        // real shape, taken from the file on this machine — a normalised
+        // `limits` array beside the older per-window keys.
+        let config = """
+        {"someOtherKey":1,"cachedUsageUtilization":{"fetchedAtMs":1785850710036,\
+        "utilization":{"five_hour":{"utilization":23,"resets_at":"2026-08-04T18:20:00.970871+00:00"},\
+        "seven_day":{"utilization":21,"resets_at":"2026-08-08T01:00:00.970894+00:00"},\
+        "seven_day_opus":null,"seven_day_sonnet":null,\
+        "limits":[{"kind":"session","group":"session","percent":23,"severity":"normal",\
+        "resets_at":"2026-08-04T18:20:00.970871+00:00","scope":null,"is_active":true},\
+        {"kind":"weekly_all","group":"weekly","percent":21,"severity":"normal",\
+        "resets_at":"2026-08-08T01:00:00.970894+00:00","scope":null,"is_active":false}]}}}
+        """
+        let cached = ClaudeCodeProvider.cachedUtilization(in: Data(config.utf8))
+        expect(cached.count == 2, "both cached windows are read (\(cached.count))")
+        guard let session = cached.first(where: { $0.minutes == 300 }),
+              let week = cached.first(where: { $0.minutes == 10_080 })
+        else {
+            expect(false, "the five-hour and weekly windows are recognised")
+            return
+        }
+        expect(session.usedFraction == 0.23, "the five-hour gauge is the tool's own percentage")
+        expect(week.usedFraction == 0.21, "so is the weekly one")
+        expect(session.label == "5-hour limit", "and it is named for what it is")
+        expect(
+            session.observedAt.map { abs($0.timeIntervalSince1970 - 1_785_850_710) < 1 } ?? false,
+            "the reading carries when the tool fetched it"
+        )
+        expect(
+            session.resetsAt != nil && week.resetsAt != nil,
+            "each window keeps its own reset time"
+        )
+        // The freshness rule that matters: this reading is from August 4th, so
+        // by any later date the windows it describes are gone. Showing 23% of a
+        // five-hour window from a fortnight ago would be worse than showing
+        // nothing.
+        expect(
+            !session.isCurrent(now: Date(timeIntervalSince1970: 1_787_000_000)),
+            "an expired cached reading is not treated as current"
+        )
+
+        // A window the account does not have arrives as null and must not become
+        // a confident zero — "0% used" and "no such limit" are different claims.
+        expect(
+            !cached.contains { $0.kind.contains("opus") },
+            "a null window is skipped rather than shown as empty"
+        )
+
+        // Older builds wrote only the per-window keys, and a per-model weekly
+        // window names the model it applies to.
+        let olderShape = """
+        {"cachedUsageUtilization":{"fetchedAtMs":1785850710036,\
+        "utilization":{"five_hour":{"utilization":40,"resets_at":"2026-08-04T18:20:00Z"},\
+        "seven_day_opus":{"utilization":66,"resets_at":"2026-08-08T01:00:00Z"}}}}
+        """
+        let older = ClaudeCodeProvider.cachedUtilization(in: Data(olderShape.utf8))
+        expect(older.count == 2, "the shape without a limits array still reads (\(older.count))")
+        expect(
+            older.contains { $0.label == "weekly limit · Opus" },
+            "a weekly window scoped to one model says so (\(older.map(\.label)))"
+        )
+
+        expect(
+            ClaudeCodeProvider.cachedUtilization(in: Data(#"{"hasCompletedOnboarding":true}"#.utf8)).isEmpty,
+            "a config with no cached usage yields nothing"
+        )
+
         // The cache is where a reading lives between refreshes, because the scan
         // is incremental and a quiet refresh reads no records at all.
         let url = URL(fileURLWithPath: NSTemporaryDirectory() + "digitest-limits-\(UUID()).json")

@@ -102,10 +102,15 @@ struct RateWindow: Sendable, Hashable, Codable {
     /// When the tool wrote this down. A gauge is only as current as its record,
     /// and saying so is the difference between a reading and a guess.
     var observedAt: Date?
+    /// A name from the tool where it knows a better one than the window length
+    /// gives — a weekly limit that applies to one model only, say. Naming stays
+    /// with the provider so the pane never has to know whose window it is.
+    var title: String?
 
     init(
         kind: String, usedFraction: Double? = nil, minutes: Int? = nil,
-        resetsAt: Date? = nil, blocked: Bool = false, observedAt: Date? = nil
+        resetsAt: Date? = nil, blocked: Bool = false, observedAt: Date? = nil,
+        title: String? = nil
     ) {
         self.kind = kind
         self.usedFraction = usedFraction
@@ -113,6 +118,7 @@ struct RateWindow: Sendable, Hashable, Codable {
         self.resetsAt = resetsAt
         self.blocked = blocked
         self.observedAt = observedAt
+        self.title = title
     }
 
     /// Decoded field by field: this is persisted in the scan cache, and a cache
@@ -125,12 +131,14 @@ struct RateWindow: Sendable, Hashable, Codable {
         resetsAt = try c.decodeIfPresent(Date.self, forKey: .resetsAt)
         blocked = try c.decodeIfPresent(Bool.self, forKey: .blocked) ?? false
         observedAt = try c.decodeIfPresent(Date.self, forKey: .observedAt)
+        title = try c.decodeIfPresent(String.self, forKey: .title)
     }
 
     /// A name for the window, taken from its length where the tool gave one so
     /// that a tool naming a window differently still reads correctly.
     var label: String {
-        switch minutes {
+        if let title { return title }
+        return switch minutes {
         case .some(let m) where m <= 60: "\(m)-minute limit"
         case .some(let m) where m < 1_440: "\(m / 60)-hour limit"
         case .some(let m) where m == 1_440: "daily limit"

@@ -228,11 +228,21 @@ so it is shown as a gauge, with the time the tool wrote it whenever that is more
 than a couple of hours ago. A percentage from three weeks ago describes three
 weeks ago, and says so.
 
-**Claude Code writes nothing until a limit actually stops a turn.** Then it
-records the type of window and when it clears — a refusal, not a gauge. There is
-no allowance in those logs for a percentage to be a percentage *of*, so none is
-shown. When a refusal is still in force the pane says so and gives the reset
-time; otherwise the section says plainly that this tool records no allowance.
+**Claude Code keeps its own copy of what `/usage` reports** — in `~/.claude.json`
+under `cachedUsageUtilization`, with the five-hour and weekly windows as
+percentages and their reset times. That is the same figure the CLI prints, so it
+is a real gauge and still entirely on this machine.
+
+The catch is freshness: the CLI refreshes that cache when it fetches usage, not
+on a timer, so a reading can be days old. Each window carries its own
+`resets_at`, so an expired one is **not** shown — a five-hour window from a
+fortnight ago describes nothing. The section says how old the reading is and
+that asking Claude Code for its usage will refresh it, rather than going quiet
+and looking broken.
+
+The transcripts carry one further signal: when a limit actually stops a turn,
+Claude Code records the window type and when it clears. While such a refusal is
+still in force the pane shows it as the full bar it is.
 
 What is offered instead, for both tools, is a **comparison against your own
 record**: this window against the busiest window on file, this week against the
@@ -242,6 +252,12 @@ that is what it is — something that happened, not something you are entitled t
 The alternative was to guess a quota from the plan tier and show a confident
 bar against it. Every number in this app is one you can check; a bar against an
 invented ceiling is not.
+
+Nothing is fetched over the network for any of this. The documented Anthropic
+usage API answers a different question — it reports API-organisation spend and
+needs an admin key, not a subscription's rate-limit utilisation — and the
+endpoint the CLI itself calls is internal and authenticates as you. Reading the
+file the tool already wrote costs nothing and keeps the promise in the footer.
 
 Readings are kept in the scan cache. Scanning is incremental, so a refresh that
 finds no new bytes reads no records, and the tool's last reading is still its

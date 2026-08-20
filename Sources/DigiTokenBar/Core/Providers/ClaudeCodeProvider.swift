@@ -36,6 +36,14 @@ struct ClaudeCodeProvider: UsageProvider {
     func isAvailable() -> Bool { !Self.projectRoots().isEmpty }
 
     func scan(cache: ScanCache) -> [UsageEvent] {
+        // Read every time rather than only on a backfill: `.claude.json` is
+        // rewritten by the CLI on its own schedule, with no relation to the
+        // transcripts this scan resumes through.
+        for file in Self.configFiles() {
+            guard let data = try? Data(contentsOf: file) else { continue }
+            for window in Self.cachedUtilization(in: data) { cache.recordLimit(window) }
+        }
+
         var events: [UsageEvent] = []
         for root in Self.projectRoots() {
             for file in Self.transcripts(in: root) {
@@ -57,6 +65,117 @@ struct ClaudeCodeProvider: UsageProvider {
             files.append(url)
         }
         return files
+    }
+
+    /// Claude Code's own copy of what `/usage` shows: how much of the five-hour
+    /// and weekly windows is used, and when each resets.
+    ///
+    /// It caches this in `~/.claude.json` under `cachedUsageUtilization`, which
+    /// is the same figure the CLI prints — a real gauge, not an estimate, and
+    /// still entirely on this machine. The transcripts carry nothing like it;
+    /// they only record the moment a limit actually stopped a turn.
+    ///
+    /// The catch is freshness: the CLI refreshes this when it fetches usage, not
+    /// on a timer, so a reading can be days old. `fetchedAtMs` is carried
+    /// through as `observedAt` and every window keeps its own `resets_at`, so a
+    /// stale one is shown as stale and an expired one is not shown at all.
+    static func configFiles() -> [URL] {
+        let env = ProcessInfo.processInfo.environment
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        var files = [home.appendingPathComponent(".claude.json")]
+
+        // A moved config dir keeps the file beside the directory it names.
+        if let configured = env["CLAUDE_CONFIG_DIR"], !configured.isEmpty {
+            for part in configured.split(separator: ",") {
+                let path = part.trimmingCharacters(in: .whitespaces)
+                guard !path.isEmpty else { continue }
+                let dir = URL(fileURLWithPath: NSString(string: path).expandingTildeInPath)
+                files.append(dir.appendingPathComponent(".claude.json"))
+                files.append(dir.deletingLastPathComponent().appendingPathComponent(".claude.json"))
+            }
+        }
+
+        var seen = Set<String>()
+        return files
+            .filter { seen.insert($0.standardizedFileURL.path).inserted }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    /// Reads the cached utilization out of a `.claude.json` payload.
+    ///
+    /// Prefers the normalised `limits` array, which names each window and its
+    /// scope, and falls back to the individual keys for versions that wrote only
+    /// those. Windows the account does not have come through as null and are
+    /// skipped rather than shown as zero — "0% used" and "no such limit" are
+    /// different statements.
+    static func cachedUtilization(in data: Data) -> [RateWindow] {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let cached = root["cachedUsageUtilization"] as? [String: Any],
+              let utilization = cached["utilization"] as? [String: Any]
+        else { return [] }
+
+        let observed = (cached["fetchedAtMs"] as? Double).map {
+            Date(timeIntervalSince1970: $0 / 1000)
+        }
+
+        func window(
+            kind: String, percent: Double, resets: String?, minutes: Int?, scope: String?
+        ) -> RateWindow {
+            RateWindow(
+                kind: "claude_\(kind)",
+                usedFraction: max(0, min(1, percent / 100)),
+                minutes: minutes,
+                resetsAt: resets.flatMap(TimestampParser.parse),
+                blocked: percent >= 100,
+                observedAt: observed,
+                // Only when the tool says the window covers one model; the plain
+                // windows are left to be named after their length.
+                title: scope.map { "weekly limit · \($0.capitalized)" }
+            )
+        }
+
+        if let limits = utilization["limits"] as? [[String: Any]], !limits.isEmpty {
+            return limits.compactMap { entry in
+                guard let percent = entry["percent"] as? Double ?? (entry["percent"] as? Int).map(Double.init)
+                else { return nil }
+                let kind = (entry["kind"] as? String) ?? "limit"
+                let scope = entry["scope"] as? String
+                return window(
+                    kind: scope.map { "\(kind)_\($0)" } ?? kind,
+                    percent: percent,
+                    resets: entry["resets_at"] as? String,
+                    minutes: Self.windowMinutes(forGroup: entry["group"] as? String, kind: kind),
+                    scope: scope
+                )
+            }
+        }
+
+        return utilization.compactMap { key, value in
+            guard let entry = value as? [String: Any],
+                  let percent = entry["utilization"] as? Double
+                    ?? (entry["utilization"] as? Int).map(Double.init)
+            else { return nil }
+            // `seven_day_opus` is the weekly window for one model; the suffix is
+            // the scope the newer shape spells out.
+            let scope = key.hasPrefix("seven_day_") ? String(key.dropFirst("seven_day_".count)) : nil
+            return window(
+                kind: key,
+                percent: percent,
+                resets: entry["resets_at"] as? String,
+                minutes: Self.windowMinutes(for: key),
+                scope: scope
+            )
+        }
+        .sorted { ($0.minutes ?? .max) < ($1.minutes ?? .max) }
+    }
+
+    private static func windowMinutes(forGroup group: String?, kind: String) -> Int? {
+        switch group ?? kind {
+        case "session", "five_hour": 300
+        case "weekly", "weekly_all", "seven_day": 10_080
+        case "daily": 1_440
+        default: windowMinutes(for: kind)
+        }
     }
 
     func backfillLimits(cache: ScanCache) {

@@ -47,6 +47,7 @@ final class LimitsSection: NSView {
         }
 
         let live = usage.limits.filter { $0.isCurrent() }
+        let expired = usage.limits.filter { !$0.isCurrent() }
         for window in live { add(gauge: window) }
 
         // The pace rows are always shown. They are the part that exists for
@@ -73,12 +74,25 @@ final class LimitsSection: NSView {
             )
         }
 
-        note.stringValue = live.isEmpty
-            ? "\(usage.provider.displayName) does not record an allowance in its logs, so there is "
-                + "no quota to show. The bars above compare against your own busiest window and "
-                + "week — a high-water mark, not a limit."
-            : "The gauge is what the tool itself last wrote down. The bars below it compare "
+        note.stringValue = Self.note(live: live, expired: expired, tool: usage.provider.displayName)
+    }
+
+    /// An expired reading is not shown as a gauge — a five-hour window from a
+    /// fortnight ago describes nothing — but it is worth saying that one exists
+    /// and how to refresh it. A section that simply goes quiet looks broken.
+    private static func note(live: [RateWindow], expired: [RateWindow], tool: String) -> String {
+        if !live.isEmpty {
+            return "The gauge is what the tool itself last wrote down. The bars below it compare "
                 + "against your own record, which is not a limit."
+        }
+        if let last = expired.compactMap(\.observedAt).max() {
+            return "\(tool) last wrote down its usage \(relative.localizedString(for: last, relativeTo: Date()))"
+                + ", and those windows have since reset. Ask it for its usage to refresh the figure. "
+                + "The bars above are your own record, not a limit."
+        }
+        return "\(tool) has not written down an allowance yet, so there is no quota to show. "
+            + "The bars above compare against your own busiest window and week — a high-water "
+            + "mark, not a limit."
     }
 
     private func add(gauge window: RateWindow) {
