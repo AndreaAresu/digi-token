@@ -168,11 +168,11 @@ through Angemon's wings and Zurumon's eye highlights, which is exactly the case
 
 Early, but the loop is complete. Working today: both providers, incremental
 scanning, the full growth ladder, care-driven branching, the X-Antibody roll,
-the DigiDex, idle animation, the floating pet, notifications, and Jogress in the
-model layer.
+the DigiDex, idle animation, the floating pet, notifications, the collection
+screen, and Jogress both between your own partners and across tamers.
 
-Not built yet: localisation, and a guard on the pricing table — see
-[TODO.md](TODO.md) for the list, with what each one would take.
+Not built yet: localisation — see [TODO.md](TODO.md), which also records what
+is deliberately not being built.
 
 ## The shop
 
@@ -252,6 +252,20 @@ a 336K median session — comes out with everything silent except the model spli
 The model rule deliberately stops at reporting the split. Whether a given task
 needed the larger model is not in the logs, and the coach does not pretend
 otherwise.
+
+It also stops when it cannot price what it is looking at. Costs here are
+estimates against published API prices, and a model id the table has never seen
+is charged at a fallback rate — fine for a rough total, not fine for a claim
+about *which* model is carrying the bill, since a guessed rate on enough tokens
+can change the answer. So the coach measures how much of your spend it could not
+price, says so when that is more than 1%, and **withholds the model-mix claim
+entirely** when it is more than 10% or when the top model itself is the
+unpriced one. The other three rules read token counts rather than money and keep
+running regardless.
+
+A test asserts that every model id in the real logs on this machine is in the
+table. It fails the day a new model ships, which is exactly when you want to
+hear about it.
 
 ## Tamer cards and Jogress between tamers
 

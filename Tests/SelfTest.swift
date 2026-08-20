@@ -967,6 +967,74 @@ enum SelfTest {
             "a tamer already using cheaper models is left alone"
         )
 
+        // A model the price table has never heard of. Its cost is a guess, so
+        // the coach must not turn that guess into a claim about where the money
+        // goes — it says nothing, and says why.
+        var guessed = (0..<12).map {
+            event(
+                model: "claude-quokka-9", session: "g\($0)", key: "g\($0)",
+                input: 40_000, output: 200_000, write: 400_000, read: 20_000_000
+            )
+        }
+        guessed.append(
+            event(
+                model: "claude-haiku-4-5", session: "g0", key: "gh",
+                input: 500, output: 500, write: 0, read: 5_000
+            )
+        )
+        let guessedReport = Coach.report(events: guessed)
+        expect(
+            !ModelPricing.isKnown("claude-quokka-9"),
+            "a model outside the table is reported as unpriced"
+        )
+        expect(
+            ModelPricing.isKnown("claude-opus-5") && ModelPricing.isKnown("codex"),
+            "models in the table are reported as priced"
+        )
+        expect(
+            guessedReport.unpricedShare > 0.9,
+            "the unpriced share is measured (\(Int(guessedReport.unpricedShare * 100))%)"
+        )
+        expect(guessedReport.withheldModelMix, "a guessed cost split is withheld, not published")
+        expect(
+            !fired(guessedReport, "model-mix"),
+            "no claim about the model mix rests on a fallback rate"
+        )
+        expect(
+            guessedReport.unpricedModels.first == "claude-quokka-9",
+            "the caveat can name the model it could not price"
+        )
+
+        // The other rules read token counts rather than money, so an unpriced
+        // model must not silence them too.
+        let guessedCache = (0..<12).map {
+            event(
+                model: "claude-quokka-9", session: "gc\($0)", key: "gc\($0)",
+                input: 900_000, output: 100_000, write: 50_000, read: 100_000
+            )
+        }
+        expect(
+            fired(Coach.report(events: guessedCache), "cache-reuse"),
+            "a measured rule still fires on a model with no price"
+        )
+
+        // And a stray unpriced model too small to matter must not withhold the
+        // claim: the bar is a share of spend, not the mere presence of one.
+        var mostlyPriced = lopsided
+        mostlyPriced.append(
+            event(
+                model: "claude-quokka-9", session: "s0", key: "gq",
+                input: 100, output: 100, write: 0, read: 100
+            )
+        )
+        let mostlyReport = Coach.report(events: mostlyPriced)
+        expect(
+            !mostlyReport.withheldModelMix,
+            "a rounding-error model does not silence the coach "
+                + "(\(String(format: "%.2f%%", mostlyReport.unpricedShare * 100)))"
+        )
+        expect(fired(mostlyReport, "model-mix"), "the claim still fires when the spend is priced")
+
         // Two tools, two habits. The coach is scoped to one tool at a time
         // because a report over the union describes neither: here the cache
         // reads from the tool that is used well swamp the one that is not, and
@@ -1574,6 +1642,19 @@ enum SelfTest {
             print("  (no local AI-tool logs found — parser checks above still ran)")
             return
         }
+
+        // Every model this machine has actually used has to be in the price
+        // table. This is the check that fails the day a new model ships, which
+        // is exactly when you want to hear about it: until the table learns the
+        // id, its tokens are priced by a fallback rate and the coach quietly
+        // stops claiming where the money goes.
+        let usedModels = Set(allEvents.map(\.model)).filter { !$0.isEmpty }
+        let unpriced = usedModels.filter { !ModelPricing.isKnown($0) }.sorted()
+        expect(
+            unpriced.isEmpty,
+            "every model in the real logs has a price — add it to ModelPricing.table "
+                + "(\(unpriced.isEmpty ? "\(usedModels.count) models, all known" : unpriced.joined(separator: ", ")))"
+        )
 
         // What the coach actually says about this machine. Calibration is only
         // meaningful against the profile the app really computes here, so the

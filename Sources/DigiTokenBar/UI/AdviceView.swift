@@ -56,14 +56,18 @@ final class CoachSection: NSView {
     private let summary = UI.label("", size: 10, color: .secondaryLabelColor, mono: true)
     private let verdict = UI.label("", size: 11, weight: .semibold)
     private let heading = UI.caption("Coach")
+    /// Says when a cost figure is partly guesswork, and when that guesswork was
+    /// enough to make the coach withhold a claim.
+    private let caveat = UI.label("", size: 9, color: .tertiaryLabelColor)
 
     init() {
         super.init(frame: .zero)
 
         UI.wraps(verdict, lines: 2, width: AdviceRow.textWidth)
         UI.wraps(summary, lines: 2, width: AdviceRow.textWidth)
+        UI.wraps(caveat, lines: 3, width: AdviceRow.textWidth)
 
-        let head = UI.stack(.vertical, spacing: 3, [verdict, summary])
+        let head = UI.stack(.vertical, spacing: 3, [verdict, summary, caveat])
         let stack = UI.stack(.vertical, spacing: 8, [heading, head, rows])
         addSubview(stack)
 
@@ -89,6 +93,8 @@ final class CoachSection: NSView {
             rows.removeArrangedSubview($0)
             $0.removeFromSuperview()
         }
+
+        showCaveat(report)
 
         guard !report.isTooEarly else {
             verdict.stringValue = "Not enough history yet"
@@ -119,6 +125,32 @@ final class CoachSection: NSView {
             let row = AdviceRow(advice)
             rows.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
+        }
+    }
+
+    /// Every cost figure here is an estimate against published API prices. When
+    /// part of it was priced by a fallback rate the tamer is told, because the
+    /// alternative is a confident number nobody can check — and if that part was
+    /// large enough, the coach has already withheld the claim that rests on it.
+    private func showCaveat(_ report: CoachReport) {
+        let named = report.unpricedModels.prefix(2).joined(separator: ", ")
+        if report.withheldModelMix, !report.unpricedModels.isEmpty {
+            caveat.stringValue =
+                "No claim about where the money goes: \(named) "
+                + "\(report.unpricedModels.count == 1 ? "is" : "are") not in the price table, "
+                + "and \(Int((report.unpricedShare * 100).rounded()))% of your tokens went there."
+            caveat.textColor = Theme.accent
+            caveat.isHidden = false
+        } else if report.unpricedShare >= Coach.unpricedNoteBar {
+            caveat.stringValue =
+                "Costs are estimates, and \(Int((report.unpricedShare * 100).rounded()))% of "
+                + "them are a guess — \(named) \(report.unpricedModels.count == 1 ? "is" : "are") "
+                + "not in the price table."
+            caveat.textColor = .tertiaryLabelColor
+            caveat.isHidden = false
+        } else {
+            caveat.stringValue = ""
+            caveat.isHidden = true
         }
     }
 }
