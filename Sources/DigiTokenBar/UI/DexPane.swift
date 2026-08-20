@@ -58,6 +58,7 @@ final class DexPane: NSView {
         stageMenu.action = #selector(filterChanged)
         stageMenu.font = .systemFont(ofSize: 11)
 
+        bar.setAccessibilityLabel("DigiDex completion")
         let header = UI.stack(.horizontal, spacing: 6, [
             counterLabel, UI.label("met", size: 10, color: .secondaryLabelColor),
             UI.spacer(), xLabel, raisedLabel,
@@ -108,6 +109,9 @@ final class DexPane: NSView {
         let total = DigiDex.shared.all.count
         counterLabel.stringValue = "\(store.seenDigimon.count) / \(total)"
         bar.value = store.completion
+        // The percentage rounds to zero for the first few hundred forms, which
+        // is exactly when the count matters most.
+        bar.setAccessibilityValue("\(store.seenDigimon.count) of \(total) met")
         xLabel.stringValue = store.seenXAntibody.isEmpty ? "" : "X ×\(store.seenXAntibody.count)"
         raisedLabel.stringValue = "\(store.collection.count) raised"
 
@@ -219,6 +223,12 @@ final class DexCell: NSView {
         self.onTap = onTap
         super.init(frame: .zero)
 
+        // The cell is one item, not a picture next to a caption next to three
+        // stars. Its children are folded in so VoiceOver reads it once.
+        setAccessibilityElement(true)
+        setAccessibilityRole(seen ? .button : .staticText)
+        setAccessibilityChildren([])
+
         wantsLayer = true
         layer?.cornerRadius = 6
         if seen {
@@ -275,14 +285,25 @@ final class DexCell: NSView {
         ])
 
         if seen {
+            let rarity = DigiDex.shared.rarity(of: entry)
             toolTip = "\(entry.name) · \(entry.stageLabel?.dubName ?? entry.stage) · "
                 + "\(entry.attribute.rawValue)"
                 + (entry.primaryField.map { " · \($0)" } ?? "")
                 + "\nClick for the full entry"
+            setAccessibilityLabel(
+                "\(entry.name), met. \(entry.stageLabel?.dubName ?? entry.stage), "
+                    + "\(entry.attribute.rawValue), \(rarity.label)"
+                    + (entry.x ? ", X-Antibody" : "")
+            )
+            setAccessibilityHelp("Opens the full entry")
         } else if reachable {
             toolTip = "\(entry.name) — one digivolution away from a form you have met"
+            setAccessibilityLabel(
+                "\(entry.name), not met — one digivolution away from a form you have"
+            )
         } else {
             toolTip = "Not met yet"
+            setAccessibilityLabel("\(entry.name), not met yet")
         }
     }
 

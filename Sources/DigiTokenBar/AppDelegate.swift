@@ -125,12 +125,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             ? " \(TokenFormatter.short(today))"
             : ""
 
+        // The status item is a sprite and, at most, a token count. Without a
+        // label VoiceOver announces an unnamed button in the menu bar.
+        button.setAccessibilityLabel(
+            "DigiTokenBar — \(store.partner.displayName), "
+                + "\(TokenFormatter.short(today)) billable tokens today"
+        )
+
         guard let entry = store.partner.entry else {
             menuBarArtwork = nil
             button.image = NSImage(
                 systemSymbolName: "oval.portrait.fill", accessibilityDescription: "DigiEgg"
             )
             button.toolTip = "DigiTama — \(TokenFormatter.short(store.partner.tokens)) tokens"
+            button.setAccessibilityLabel(
+                "DigiTokenBar — DigiTama, \(TokenFormatter.short(store.partner.tokens)) tokens to hatch"
+            )
             return
         }
 

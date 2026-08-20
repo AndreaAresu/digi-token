@@ -10,21 +10,7 @@ accumulating a "done" section — git remembers.
 
 ---
 
-## 1. No accessibility labels anywhere
-
-**The gap.** `grep -r "setAccessibility" Sources/` returns nothing. An app whose
-content is sprites and 7–9pt text is exactly the one a screen reader cannot
-read: DigiDex cells are unnamed images, `StatTile` is a number with no context,
-`RarityStars` is a row of mute `NSImageView`s (the tooltip serves a mouse, not
-VoiceOver).
-
-**What it would take.** `setAccessibilityLabel` on `SpriteView`, `DexCell`,
-`StatTile` and `RarityStars` — on the order of thirty lines. The strings already
-exist as tooltips in most cases.
-
-This is the only item here that is about someone who cannot use the app today.
-
-## 2. The pricing table fails silently
+## 1. The pricing table fails silently
 
 **The gap.** `ModelPricing.rate(for:)` matches the model id by substring and
 falls back to a Sonnet-shaped rate when nothing matches — without telling
