@@ -81,6 +81,9 @@ enum SelfTest {
         section("Rarity stars")
         testRarityStars()
 
+        section("Collection")
+        testCollection()
+
         section("Dex detail")
         testDexDetail()
 
@@ -1275,6 +1278,101 @@ enum SelfTest {
             best > CareEngine.xAntibodyChance(profile: CareProfile(), hasCharm: false),
             "discipline is what improves the roll"
         )
+    }
+
+    /// The local Jogress — two of the tamer's own graduated partners.
+    ///
+    /// It had no caller until the collection got a screen, so what is pinned
+    /// here is mostly the guarding: every way it can refuse has to leave the
+    /// collection exactly as it was. A fusion that half-happened would eat weeks
+    /// of someone's raising.
+    @MainActor
+    static func testCollection() {
+        guard let sample = DigiDex.shared.entries(stage: .ultimate).first,
+              let other = DigiDex.shared.entries(stage: .ultimate).dropFirst().first
+        else {
+            expect(false, "the dex has two Ultimates to fuse")
+            return
+        }
+
+        func partner(seed: UInt64, id: Int) -> Partner {
+            var partner = Partner(seed: seed)
+            partner.digimonID = id
+            partner.stage = .ultimate
+            partner.lineage = [id]
+            partner.tokens = 8_000_000
+            partner.retiredAt = Date()
+            return partner
+        }
+
+        let left = partner(seed: 111, id: sample.id)
+        let right = partner(seed: 222, id: other.id)
+
+        func makeStore(_ collection: [Partner], charges: Int = 1) -> PartnerStore? {
+            let url = URL(fileURLWithPath: NSTemporaryDirectory() + "digitest-coll-\(UUID()).json")
+            var wallet = Wallet()
+            wallet.dna.stock = charges
+            var current = Partner(seed: 9_001)
+            current.digimonID = sample.id
+            current.stage = .adult
+            let file = PartnerStore.SaveFile(
+                partner: current, collection: collection, seenDigimon: [sample.id],
+                seenXAntibody: [], baseline: 0, hasBaseline: true, profile: nil, wallet: wallet
+            )
+            guard let data = try? JSONEncoder().encode(file),
+                  (try? data.write(to: url, options: .atomic)) != nil
+            else { return nil }
+            return PartnerStore(storeURL: url)
+        }
+
+        guard let store = makeStore([left, right]) else {
+            expect(false, "a store with a collection can be built")
+            return
+        }
+
+        // Every refusal, and each one has to consume nothing.
+        expect(store.jogress(left, left) == .samePartner, "a partner cannot fuse with itself")
+        expect(
+            store.jogress(left, partner(seed: 333, id: other.id)) == .notInCollection,
+            "a partner outside the collection cannot be fused"
+        )
+        expect(store.collection.count == 2, "a refused fusion consumed nothing")
+        expect(store.wallet.dna.stock == 1, "a refused fusion spent no charge")
+
+        guard let broke = makeStore([left, right], charges: 0) else {
+            expect(false, "a store with no charges can be built")
+            return
+        }
+        expect(broke.jogress(left, right) == .noCharge, "a local Jogress costs a DNA Charge")
+        expect(broke.collection.count == 2, "the empty meter cost nothing else")
+
+        // The real path.
+        let before = store.seenDigimon.count
+        guard case .fused(let name) = store.jogress(left, right) else {
+            expect(false, "two graduated partners fuse")
+            return
+        }
+        expect(!name.isEmpty, "the fusion produced a form (\(name))")
+        expect(store.collection.count == 1, "both halves were spent and one form took their place")
+        expect(
+            !store.collection.contains { $0.id == left.id || $0.id == right.id },
+            "neither half is still in the collection"
+        )
+        expect(store.wallet.dna.stock == 0, "the fusion spent the charge")
+        expect(store.seenDigimon.count > before, "the fused form is recorded in the DigiDex")
+        expect(
+            store.collection.first?.lineage.count == left.lineage.count + right.lineage.count + 1,
+            "the fused partner carries both lineages"
+        )
+
+        // Determinism, for the same reason every other roll here is deterministic.
+        guard let replay = makeStore([left, right]),
+              case .fused(let again) = replay.jogress(left, right)
+        else {
+            expect(false, "the replay fused at all")
+            return
+        }
+        expect(again == name, "the same pair always fuses into the same form")
     }
 
     static func testDexDetail() {
