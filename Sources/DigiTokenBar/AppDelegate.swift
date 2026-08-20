@@ -17,6 +17,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var bobTimer: Timer?
     private var bobPhase = 0
 
+    /// Watches for a click outside the popover while it is open.
+    ///
+    /// `.transient` is supposed to do this on its own, and mostly does — but the
+    /// popover is made key below so the DigiDex search field can be typed in,
+    /// and a key popover belonging to an accessory app stops seeing some of the
+    /// clicks that should dismiss it: clicking straight into another app's
+    /// window, or into a window of an app that was already frontmost, would
+    /// leave it hanging there. Watching for the click ourselves makes the
+    /// behaviour the same every time.
+    private var dismissMonitors: [Any] = []
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.target = self
@@ -31,7 +42,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.delegate = self
 
         monitor.attach(partnerStore: store)
-        monitor.onChange = { [weak self] in self?.updateStatusItem() }
+        monitor.onChange = { [weak self] in
+            guard let self else { return }
+            self.updateStatusItem()
+            // A scan that lands while the panel is open should be visible in it.
+            // Without this the popover shows whatever was true when it opened
+            // until the tamer closes and reopens it.
+            if self.popover.isShown { self.controller.refresh() }
+        }
         store.onChange = { [weak self] in
             self?.updateStatusItem()
             self?.pet?.refresh()
@@ -166,7 +184,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // A transient popover keeps focus behind it otherwise, which makes the
         // search field in the DigiDex tab unusable.
         popover.contentViewController?.view.window?.makeKey()
+        startDismissWatch()
         Task { await monitor.refresh(); controller.refresh() }
+    }
+
+    // MARK: - Dismissal
+
+    /// Closes the popover on the first click that lands anywhere else.
+    ///
+    /// Two monitors, because one event stream does not cover both cases: the
+    /// global one sees clicks in other applications, which never reach us, and
+    /// the local one sees clicks inside our own windows — the floating pet, or
+    /// the status item itself. The local monitor returns the event untouched so
+    /// whatever was clicked still receives it.
+    private func startDismissWatch() {
+        stopDismissWatch()
+        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+
+        let global = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] _ in
+            Task { @MainActor in self?.closePopoverFromOutsideClick() }
+        })
+        if let global { dismissMonitors.append(global) }
+
+        let local = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] event in
+            guard let self else { return event }
+            // A click inside the popover is not an outside click, and the status
+            // item has its own toggle — closing here as well would reopen it.
+            let inPopover = event.window === self.popover.contentViewController?.view.window
+            let inStatusItem = event.window === self.statusItem.button?.window
+            if !inPopover, !inStatusItem {
+                self.closePopoverFromOutsideClick()
+            }
+            return event
+        })
+        if let local { dismissMonitors.append(local) }
+    }
+
+    private func closePopoverFromOutsideClick() {
+        guard popover.isShown else { return }
+        popover.performClose(nil)
+    }
+
+    private func stopDismissWatch() {
+        dismissMonitors.forEach(NSEvent.removeMonitor)
+        dismissMonitors.removeAll()
+    }
+
+    /// Called by AppKit whichever way the popover closed — our own watch, the
+    /// transient behaviour, or the status item being clicked again — so the
+    /// monitors never outlive the window they were installed for.
+    func popoverDidClose(_ notification: Notification) {
+        stopDismissWatch()
     }
 }
 
