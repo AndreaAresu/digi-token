@@ -67,6 +67,7 @@ final class PartnerPane: NSView {
         fieldLabel.textColor = Theme.accent.withAlphaComponent(0.8)
 
         // Growth
+        bar.setAccessibilityLabel("Growth to the next digivolution")
         let progressRow = UI.stack(.horizontal, spacing: 6, [progressCaption, UI.spacer(), progressValue])
         let growth = UI.stack(.vertical, spacing: 4, [progressRow, bar])
 
@@ -219,6 +220,13 @@ final class StatTile: NSView {
         titleLabel = UI.label(label, size: 9, color: .secondaryLabelColor)
         super.init(frame: .zero)
 
+        // One tile is one fact: "Weight, 47, cache-efficient". Left as three
+        // separate labels a screen reader reads a number with no subject.
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+        setAccessibilityChildren([])
+        setAccessibilityLabel(label)
+
         wantsLayer = true
         layer?.cornerRadius = 7
         layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.05).cgColor
@@ -240,5 +248,6 @@ final class StatTile: NSView {
         valueLabel.stringValue = value
         valueLabel.textColor = warning ? .systemOrange : .labelColor
         hintLabel.stringValue = hint
+        setAccessibilityValue(hint.isEmpty ? value : "\(value), \(hint)")
     }
 }

@@ -109,6 +109,9 @@ final class ShopRow: NSView {
         self.onBuy = onBuy
         super.init(frame: .zero)
 
+        setAccessibilityRole(.group)
+        setAccessibilityLabel(item.name)
+
         wantsLayer = true
         layer?.cornerRadius = 8
         layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.05).cgColor
@@ -151,6 +154,7 @@ final class ShopRow: NSView {
                 popup.menu?.addItem(entry)
             }
             popup.isEnabled = wallet.canAfford(item)
+            popup.setAccessibilityLabel("Buy \(item.name), choose a field")
             popup.controlSize = .small
             popup.font = .systemFont(ofSize: 10)
             popup.translatesAutoresizingMaskIntoConstraints = false
@@ -165,6 +169,8 @@ final class ShopRow: NSView {
             plain.controlSize = .small
             plain.font = .systemFont(ofSize: 10, weight: .medium)
             plain.isEnabled = wallet.canAfford(item)
+            // Five rows, five buttons reading "Buy"; the item is the label.
+            plain.setAccessibilityLabel("Buy \(item.name) for \(TokenFormatter.short(item.price)) tokens")
             plain.translatesAutoresizingMaskIntoConstraints = false
             plain.widthAnchor.constraint(equalToConstant: 74).isActive = true
             button = plain

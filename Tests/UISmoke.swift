@@ -96,6 +96,37 @@ enum UISmoke {
         }
         print("ok  nothing exceeds the \(Int(Theme.popoverWidth))pt width")
 
+        // 8. Everything drawn rather than written says what it is.
+        //
+        //    Sprites, stat tiles, dex cells, rarity stars, bars and histograms
+        //    carry their meaning in pixels, so without a label a screen reader
+        //    reaches them and has nothing to announce. The walk follows the
+        //    accessibility tree rather than the view tree: a view that folds its
+        //    children away has already taken responsibility for describing them.
+        let mustSpeak = [
+            "SpriteView", "StatTile", "DexCell", "CollectedRow",
+            "RarityStars", "BarView", "HistogramView", "ProjectRow",
+        ]
+        var mute: [String] = []
+        func audit(_ view: NSView) {
+            let name = "\(type(of: view))"
+            if mustSpeak.contains(name), (view.accessibilityLabel() ?? "").isEmpty {
+                mute.append(name)
+            }
+            let folded = view.isAccessibilityElement()
+                && (view.accessibilityChildren()?.isEmpty ?? false)
+            if !folded { view.subviews.forEach(audit) }
+        }
+        audit(v)
+        guard mute.isEmpty else {
+            print("FAIL  drawn views with no accessibility label:")
+            for name in Set(mute).sorted() {
+                print("      \(name) ×\(mute.filter { $0 == name }.count)")
+            }
+            exit(1)
+        }
+        print("ok  every drawn view carries an accessibility label")
+
         print("\nUI smoke passed")
         exit(0)
     }

@@ -143,9 +143,27 @@ enum UI {
 /// A flat progress bar. `NSProgressIndicator` cannot be tinted reliably across
 /// appearances, and the bar is the one element the tamer reads at a glance.
 final class BarView: NSView {
-    var value: Double = 0 { didSet { needsDisplay = true } }
+    var value: Double = 0 {
+        didSet {
+            needsDisplay = true
+            setAccessibilityValue("\(Int((max(0, min(1, value)) * 100).rounded()))%")
+        }
+    }
     var tint: NSColor = Theme.accent { didSet { needsDisplay = true } }
     var track: NSColor = NSColor.labelColor.withAlphaComponent(0.12)
+
+    /// A drawn bar is invisible to VoiceOver unless it says what it is. The
+    /// label is set by whoever owns the bar, since "62%" of what is the part
+    /// that matters.
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.progressIndicator)
+        setAccessibilityValue("0%")
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
 
     override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: 6) }
 
@@ -167,8 +185,39 @@ final class BarView: NSView {
 
 /// The sparkline of recent 5-hour windows.
 final class HistogramView: NSView {
-    var values: [Int] = [] { didSet { needsDisplay = true } }
-    var activeIndex: Int?
+    var values: [Int] = [] {
+        didSet {
+            needsDisplay = true
+            describe()
+        }
+    }
+    var activeIndex: Int? { didSet { describe() } }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+        describe()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    /// Bars carry their meaning in their heights, which a screen reader cannot
+    /// see. Said out loud it is a range and a peak, which is what the shape is
+    /// for anyway.
+    private func describe() {
+        setAccessibilityLabel("Recent 5-hour windows")
+        guard let peak = values.max(), !values.isEmpty else {
+            setAccessibilityValue("No windows yet")
+            return
+        }
+        var said = "\(values.count) windows, busiest \(TokenFormatter.short(peak)) billable"
+        if let activeIndex, values.indices.contains(activeIndex) {
+            said += ", current window \(TokenFormatter.short(values[activeIndex]))"
+        }
+        setAccessibilityValue(said)
+    }
 
     override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: 52) }
 
@@ -205,6 +254,14 @@ final class RarityStars: NSView {
     init(size: CGFloat = 9) {
         self.size = size
         super.init(frame: .zero)
+        // Read as one statement rather than as three anonymous images. The
+        // stars are a picture of a number, so the number is what is said.
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+        setAccessibilityChildren([])
+        // Named before it has anything to say, so a card that has not been
+        // filled in yet is still reachable rather than anonymous.
+        setAccessibilityLabel("Rarity")
         addSubview(row)
         NSLayoutConstraint.activate([
             row.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -238,7 +295,10 @@ final class RarityStars: NSView {
             row.addArrangedSubview(pip("diamond.fill", tint: tint))
         }
 
-        toolTip = "\(rarity.label) · \(rarity.detail(routes: routes))"
+        let said = "\(rarity.label) · \(rarity.detail(routes: routes))"
+        toolTip = said
+        setAccessibilityLabel("Rarity")
+        setAccessibilityValue(said)
     }
 
     private func pip(_ symbol: String, tint: NSColor) -> NSImageView {
@@ -271,6 +331,8 @@ final class SpriteView: NSImageView {
 
     init(size: CGFloat) {
         super.init(frame: .zero)
+        setAccessibilityRole(.image)
+        setAccessibilityLabel("DigiTama")
         imageScaling = .scaleProportionallyUpOrDown
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
@@ -323,6 +385,9 @@ final class SpriteView: NSImageView {
     func showSilhouette(_ entry: DigimonEntry) {
         alphaValue = 1
         contentFilters = []
+        // Named, because the grid names it too: the silhouette withholds the
+        // artwork, not the identity.
+        setAccessibilityLabel("\(entry.name), silhouette — one digivolution away")
         guard currentID != entry.id else { return }
         currentID = entry.id
         image = NSImage(systemSymbolName: "questionmark.square.dashed", accessibilityDescription: nil)
@@ -341,6 +406,7 @@ final class SpriteView: NSImageView {
     /// Placeholder for a Digimon the tamer has not met, drawn without fetching
     /// the real artwork.
     func showUnknown() {
+        setAccessibilityLabel("Not met yet")
         currentID = nil
         alphaValue = 0.32
         contentFilters = []
@@ -351,6 +417,7 @@ final class SpriteView: NSImageView {
     func show(_ entry: DigimonEntry?) {
         alphaValue = 1
         contentFilters = []
+        setAccessibilityLabel(entry?.name ?? "DigiTama, not yet hatched")
 
         guard let entry else {
             image = NSImage(

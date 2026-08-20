@@ -45,6 +45,7 @@ final class UsagePane: NSView {
         row1.distribution = .fillEqually
         row2.distribution = .fillEqually
 
+        blockBar.setAccessibilityLabel("Elapsed share of the current 5-hour window")
         let blockInner = UI.stack(.vertical, spacing: 5, [blockHeader, blockBar, blockStats])
         let blockCard = UI.card(blockInner)
         blockCard.translatesAutoresizingMaskIntoConstraints = false
@@ -214,6 +215,11 @@ final class ProjectRow: NSView {
     init(project: ProjectUsage, peak: Int) {
         super.init(frame: .zero)
 
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+        setAccessibilityChildren([])
+        setAccessibilityLabel(project.name)
+
         let name = UI.label(project.name, size: 10, weight: .medium)
         name.lineBreakMode = .byTruncatingMiddle
         let total = UI.label(
@@ -244,10 +250,13 @@ final class ProjectRow: NSView {
         ])
 
         var tip = "\(project.name) · \(TokenFormatter.grouped(project.counts.billable)) billable tokens"
+        var said = "\(TokenFormatter.grouped(project.counts.billable)) billable tokens"
         if project.today.billable > 0 {
             tip += "\n\(TokenFormatter.short(project.today.billable)) today"
+            said += ", \(TokenFormatter.short(project.today.billable)) today"
         }
         toolTip = tip
+        setAccessibilityValue(said)
     }
 
     @available(*, unavailable)

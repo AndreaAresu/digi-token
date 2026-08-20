@@ -171,8 +171,8 @@ scanning, the full growth ladder, care-driven branching, the X-Antibody roll,
 the DigiDex, idle animation, the floating pet, notifications, and Jogress in the
 model layer.
 
-Not built yet: localisation, accessibility labels, and a guard on the pricing
-table — see [TODO.md](TODO.md) for the list, with what each one would take.
+Not built yet: localisation, and a guard on the pricing table — see
+[TODO.md](TODO.md) for the list, with what each one would take.
 
 ## The shop
 
@@ -355,6 +355,17 @@ Sprites are cached as HEIC. Measured across 86 real sprites that averages 28 KB
 against 79 KB for the equivalent PNG, so a full roster projects to 34 MB rather
 than 94 MB. Alpha survives exactly, which matters: these are cut-outs, and a
 format that flattened them would paint the white card back on.
+
+## Screen readers
+
+Everything the app draws rather than writes carries an accessibility label: the
+sprites, the stat tiles, the DigiDex cells, the rarity stars, the bars and the
+window histogram. Views that are a picture of one fact — a tile, a dex cell, a
+graduated partner — fold their children away and speak once, so VoiceOver reads
+"Weight, 12, cache-efficient" rather than three unrelated fragments.
+
+`smoke-ui.sh` walks the accessibility tree and fails if any drawn view is
+reachable without a label, so a new one cannot quietly arrive mute.
 
 ## Attribution and licensing
 

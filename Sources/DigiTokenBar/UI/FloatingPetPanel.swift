@@ -53,6 +53,8 @@ final class FloatingPetPanel: NSPanel {
         sprite.show(partner.entry)
         sprite.idleMotion = Settings.shared.animateSprite
         sprite.toolTip = "\(partner.displayName) · \(partner.stage.dubName)"
+        // After `show`, which sets the plain species name.
+        sprite.setAccessibilityLabel("\(partner.displayName), \(partner.stage.dubName)")
     }
 
     /// Rebuilds at a new size. Simpler and less error-prone than mutating the

@@ -419,6 +419,17 @@ final class CollectedRow: NSView {
         self.onTap = onTap
         super.init(frame: .zero)
 
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityChildren([])
+        setAccessibilityLabel(
+            "\(partner.displayName), \(partner.stage.dubName)"
+                + (partner.isXAntibody ? ", X-Antibody" : "")
+                + ", raised on \(TokenFormatter.short(partner.tokens)) tokens"
+        )
+        setAccessibilityValue(order.map { "picked \($0) of 2" } ?? "not picked")
+        setAccessibilityHelp("Picks this partner for a Jogress; two are needed")
+
         wantsLayer = true
         layer?.cornerRadius = 8
         let selected = order != nil
@@ -507,6 +518,10 @@ final class CardView: NSView {
 
     init() {
         super.init(frame: .zero)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+        setAccessibilityChildren([])
+        setAccessibilityLabel("Your tamer card")
         wantsLayer = true
         layer?.cornerRadius = 10
         layer?.borderWidth = 1
@@ -546,7 +561,14 @@ final class CardView: NSView {
             + "dex \(card.dexSeen)/\(card.dexTotal)"
         dexBar.value = card.completion
         dexBar.tint = Theme.attribute(card.attribute)
+        dexBar.setAccessibilityLabel("DigiDex completion")
         layer?.borderColor = Theme.attribute(card.attribute).withAlphaComponent(0.45).cgColor
+
+        setAccessibilityValue(
+            "\(card.tamer), \(card.displayName), \(card.stage.dubName), "
+                + "\(card.attribute.rawValue). \(TokenFormatter.short(card.tokens)) raised, "
+                + "\(card.streak) day streak, dex \(card.dexSeen) of \(card.dexTotal)"
+        )
     }
 }
 
@@ -575,6 +597,9 @@ final class FriendRow: NSView {
         fuse.bezelStyle = .rounded
         fuse.font = .systemFont(ofSize: 10, weight: .semibold)
         fuse.setContentHuggingPriority(.required, for: .horizontal)
+        // With three friends listed there are three buttons all reading
+        // "Jogress"; the name is what tells them apart.
+        fuse.setAccessibilityLabel("Jogress with \(card.tamer)")
 
         let forget = NSButton(
             image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "Remove")!,
@@ -583,6 +608,7 @@ final class FriendRow: NSView {
         forget.isBordered = false
         forget.contentTintColor = .tertiaryLabelColor
         forget.toolTip = "Remove \(card.tamer)'s card"
+        forget.setAccessibilityLabel("Remove \(card.tamer)'s card")
 
         let text = UI.stack(.vertical, spacing: 1, [tamer, partner])
         let row = UI.stack(.horizontal, spacing: 8, [sprite, text, UI.spacer(), fuse, forget])
