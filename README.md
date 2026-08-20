@@ -228,17 +228,34 @@ so it is shown as a gauge, with the time the tool wrote it whenever that is more
 than a couple of hours ago. A percentage from three weeks ago describes three
 weeks ago, and says so.
 
-**Claude Code keeps its own copy of what `/usage` reports** — in `~/.claude.json`
-under `cachedUsageUtilization`, with the five-hour and weekly windows as
-percentages and their reset times. That is the same figure the CLI prints, so it
-is a real gauge and still entirely on this machine.
+**Claude Code's plan usage is on disk too**, in two places, and the app reads
+both because they age very differently.
 
-The catch is freshness: the CLI refreshes that cache when it fetches usage, not
-on a timer, so a reading can be days old. Each window carries its own
-`resets_at`, so an expired one is **not** shown — a five-hour window from a
-fortnight ago describes nothing. The section says how old the reading is and
-that asking Claude Code for its usage will refresh it, rather than going quiet
-and looking broken.
+The live one is `plan-usage-history.json` in the Claude app's support directory:
+a rolling log of samples, `fh` for the five-hour window and `sd` for the weekly
+one, written every quarter of an hour or so while the app runs. Only the newest
+sample is used, and it matches what the app shows under "Plan usage limits" —
+52% and 30% at the time of writing, the same two numbers.
+
+The other is `~/.claude.json` under `cachedUsageUtilization`, which is what the
+CLI itself caches from `/usage`, with reset times attached. It is refreshed only
+when the CLI goes and fetches usage, so it can be weeks stale — on this machine
+it was a fortnight old — but it is the only source a CLI-only setup has. Both
+write the same window under the same id, and the newest reading wins.
+
+Freshness is the whole difficulty, and it is handled per window rather than by a
+single timeout: a reading with a reset time is dropped once that time passes, and
+a sampled one is trusted only for as long as the window it measures. A five-hour
+figure six hours old describes a window that no longer exists; a weekly figure
+two days old is still about this week. The age is printed beside the gauge once
+it exceeds a tenth of the window.
+
+Deriving the reset time from the samples was tried and rejected. A drop in
+utilisation marks a rollover, so the window should end five hours later — but on
+this machine the last rollover ran 100% → 0% at 04:23, putting the end at 09:23
+while Claude itself reported it resetting at about 13:58. Whatever that
+allowance is measured over, it is not a fixed block from the last reset, so the
+app does not claim to know when it ends.
 
 The transcripts carry one further signal: when a limit actually stops a turn,
 Claude Code records the window type and when it clears. While such a refusal is

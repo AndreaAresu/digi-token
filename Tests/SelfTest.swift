@@ -1362,6 +1362,89 @@ enum SelfTest {
             "a request that went through says nothing about how close the limit was"
         )
 
+        // The Claude desktop app samples the live gauge every few minutes into
+        // plan-usage-history.json: `fh` is the five-hour window, `sd` the
+        // seven-day one. This is the freshest figure available anywhere on the
+        // machine — the CLI's cached copy is only rewritten when the CLI itself
+        // fetches usage, which can be weeks apart.
+        let history = """
+        {"version":2,"samples":[\
+        {"t":1787220000000,"org":"abc","u":{"fh":11,"sd":9}},\
+        {"t":1787220900000,"org":"abc","u":{"fh":52,"sd":30}}]}
+        """
+        let live = ClaudeCodeProvider.planUsage(in: Data(history.utf8))
+        expect(live.count == 2, "both sampled windows are read (\(live.count))")
+        guard let fiveHour = live.first(where: { $0.minutes == 300 }),
+              let sevenDay = live.first(where: { $0.minutes == 10_080 })
+        else {
+            expect(false, "the sampled windows are recognised")
+            return
+        }
+        expect(fiveHour.usedFraction == 0.52, "the newest sample wins, not the first")
+        expect(sevenDay.usedFraction == 0.30, "and it carries both figures")
+        expect(
+            fiveHour.observedAt?.timeIntervalSince1970 == 1_787_220_900,
+            "the sample time is the observation time"
+        )
+        expect(fiveHour.resetsAt == nil, "no reset time is invented where the file has none")
+
+        // Freshness without a reset time is judged against the window itself.
+        let sampled = Date(timeIntervalSince1970: 1_787_220_900)
+        expect(
+            fiveHour.isCurrent(now: sampled.addingTimeInterval(600)),
+            "a fresh five-hour sample is current"
+        )
+        expect(
+            !fiveHour.isCurrent(now: sampled.addingTimeInterval(6 * 3600)),
+            "a five-hour sample six hours old describes a window that is gone"
+        )
+        expect(
+            sevenDay.isCurrent(now: sampled.addingTimeInterval(2 * 86_400)),
+            "a weekly sample two days old still describes its window"
+        )
+        expect(
+            !fiveHour.isStale(now: sampled.addingTimeInterval(600)),
+            "ten minutes is not worth a caveat on a five-hour window"
+        )
+        expect(
+            fiveHour.isStale(now: sampled.addingTimeInterval(3600)),
+            "an hour is, on the same window"
+        )
+        expect(
+            !sevenDay.isStale(now: sampled.addingTimeInterval(3600)),
+            "and the same hour is nothing on a weekly one"
+        )
+
+        expect(
+            ClaudeCodeProvider.planUsage(in: Data(#"{"version":2,"samples":[]}"#.utf8)).isEmpty,
+            "a history with no samples yields nothing"
+        )
+
+        // Three files spell the five-hour window three ways. They have to end up
+        // as one row, or the pane draws the same bar twice from two ages.
+        expect(
+            ClaudeCodeProvider.canonicalKind(minutes: 300, scope: nil, fallback: "session")
+                == ClaudeCodeProvider.canonicalKind(minutes: 300, scope: nil, fallback: "fh"),
+            "one window, one id, whatever wrote it"
+        )
+        expect(
+            ClaudeCodeProvider.canonicalKind(minutes: 10_080, scope: "opus", fallback: "x")
+                != ClaudeCodeProvider.canonicalKind(minutes: 10_080, scope: nil, fallback: "x"),
+            "a window scoped to one model is not the same window"
+        )
+
+        let merge = ScanCache(url: URL(fileURLWithPath: NSTemporaryDirectory() + "digitest-merge-\(UUID()).json"))
+        merge.recordLimit(RateWindow(
+            kind: "claude_session", usedFraction: 0.23, minutes: 300,
+            observedAt: Date(timeIntervalSince1970: 1_000)
+        ))
+        merge.recordLimit(RateWindow(
+            kind: "claude_five_hour", usedFraction: 0.52, minutes: 300,
+            observedAt: Date(timeIntervalSince1970: 2_000)
+        ))
+        expect(merge.knownLimits.count == 1, "the same window under two ids collapses to one row")
+        expect(merge.knownLimits.first?.usedFraction == 0.52, "and keeps the newer reading")
+
         // Claude Code caches what `/usage` reports in ~/.claude.json. This is the
         // real shape, taken from the file on this machine — a normalised
         // `limits` array beside the older per-window keys.

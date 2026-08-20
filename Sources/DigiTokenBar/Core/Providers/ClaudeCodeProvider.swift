@@ -43,6 +43,13 @@ struct ClaudeCodeProvider: UsageProvider {
             guard let data = try? Data(contentsOf: file) else { continue }
             for window in Self.cachedUtilization(in: data) { cache.recordLimit(window) }
         }
+        // The desktop app samples the same two windows every few minutes, which
+        // is a great deal fresher than the CLI's cached copy. Both write the
+        // same canonical ids, so the newest reading wins on its own.
+        for file in Self.planUsageFiles() {
+            guard let data = try? Data(contentsOf: file) else { continue }
+            for window in Self.planUsage(in: data) { cache.recordLimit(window) }
+        }
 
         var events: [UsageEvent] = []
         for root in Self.projectRoots() {
@@ -65,6 +72,80 @@ struct ClaudeCodeProvider: UsageProvider {
             files.append(url)
         }
         return files
+    }
+
+    /// One id per window, whatever wrote it down.
+    ///
+    /// The five-hour window is reported by three different files in three
+    /// different spellings — `session`, `five_hour`, `fh`. They are the same
+    /// window, and if they arrive under different names the cache keeps three
+    /// rows and the pane draws the same bar three times.
+    static func canonicalKind(minutes: Int?, scope: String?, fallback: String) -> String {
+        let base: String
+        switch minutes {
+        case 300: base = "claude_five_hour"
+        case 10_080: base = "claude_seven_day"
+        case .some(let m): base = "claude_\(m)"
+        case nil: base = "claude_\(fallback)"
+        }
+        return scope.map { "\(base)_\($0)" } ?? base
+    }
+
+    /// The live plan-usage gauge, sampled by the Claude desktop app.
+    ///
+    /// `plan-usage-history.json` is a rolling log of samples — `fh` is the
+    /// five-hour window's utilisation, `sd` the seven-day one, both as whole
+    /// percentages, written roughly every quarter of an hour while the app is
+    /// running. It is the same figure the app shows under "Plan usage limits",
+    /// and it is far fresher than the CLI's cached copy, which is only rewritten
+    /// when the CLI itself goes and fetches usage.
+    ///
+    /// Only the newest sample is used. The rest is history the app keeps for its
+    /// own graph, and reading it would be reconstructing something the tool
+    /// already draws.
+    ///
+    /// No reset time is recorded here, so freshness is judged by the age of the
+    /// sample against the window it describes — see `RateWindow.isCurrent`.
+    ///
+    /// It is tempting to derive the reset from the samples: the utilisation
+    /// falling between two of them marks a rollover, so the window would end
+    /// five hours after that. It was tried against this machine's history and
+    /// it is wrong. The last rollover in the file ran 100% → 0% between 04:02
+    /// and 04:23, which puts the end of that window at 09:23 — while Claude
+    /// itself was reporting the window resetting at about 13:58. Whatever the
+    /// five-hour allowance is measured over, it is not a fixed block starting at
+    /// the last reset, so nothing here pretends to know when it ends.
+    static func planUsageFiles() -> [URL] {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+        return support
+            .map { $0.appendingPathComponent("Claude/plan-usage-history.json") }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    static func planUsage(in data: Data) -> [RateWindow] {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let samples = root["samples"] as? [[String: Any]],
+              let last = samples.last,
+              let stamp = last["t"] as? Double,
+              let used = last["u"] as? [String: Any]
+        else { return [] }
+
+        let observed = Date(timeIntervalSince1970: stamp / 1000)
+
+        func window(_ key: String, minutes: Int) -> RateWindow? {
+            guard let percent = used[key] as? Double ?? (used[key] as? Int).map(Double.init)
+            else { return nil }
+            return RateWindow(
+                kind: canonicalKind(minutes: minutes, scope: nil, fallback: key),
+                usedFraction: max(0, min(1, percent / 100)),
+                minutes: minutes,
+                resetsAt: nil,
+                blocked: percent >= 100,
+                observedAt: observed
+            )
+        }
+
+        return [window("fh", minutes: 300), window("sd", minutes: 10_080)].compactMap { $0 }
     }
 
     /// Claude Code's own copy of what `/usage` shows: how much of the five-hour
@@ -122,7 +203,7 @@ struct ClaudeCodeProvider: UsageProvider {
             kind: String, percent: Double, resets: String?, minutes: Int?, scope: String?
         ) -> RateWindow {
             RateWindow(
-                kind: "claude_\(kind)",
+                kind: canonicalKind(minutes: minutes, scope: scope, fallback: kind),
                 usedFraction: max(0, min(1, percent / 100)),
                 minutes: minutes,
                 resetsAt: resets.flatMap(TimestampParser.parse),

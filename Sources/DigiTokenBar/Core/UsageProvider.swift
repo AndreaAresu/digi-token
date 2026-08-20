@@ -231,17 +231,31 @@ final class ScanCache: @unchecked Sendable {
         return limits.sorted { ($0.minutes ?? .max) < ($1.minutes ?? .max) }
     }
 
-    /// Records a window, newest observation per kind winning.
+    /// Records a window, the newest observation of it winning.
+    ///
+    /// Two readings are of the same window when they cover the same length of
+    /// time and carry the same name — not merely when they share an id. One tool
+    /// can describe its five-hour window in several files under several
+    /// spellings, and a stored reading outlives the build that wrote it, so
+    /// keying on the id alone leaves the same bar drawn twice from two sources
+    /// of different ages.
     func recordLimit(_ window: RateWindow) {
         lock.lock(); defer { lock.unlock() }
-        if let index = limits.firstIndex(where: { $0.kind == window.kind }) {
-            let existing = limits[index]
-            let isNewer = (window.observedAt ?? .distantPast) >= (existing.observedAt ?? .distantPast)
-            guard isNewer else { return }
-            limits[index] = window
-        } else {
-            limits.append(window)
+
+        func isSameWindow(_ other: RateWindow) -> Bool {
+            if other.kind == window.kind { return true }
+            guard let minutes = window.minutes, other.minutes == minutes else { return false }
+            return other.title == window.title
         }
+
+        // Every match goes, not just the first: a cache written by an earlier
+        // build can already hold two rows for one window, and replacing one of
+        // them would leave the pane drawing the pair.
+        let matches = limits.filter(isSameWindow)
+        let newest = matches.compactMap(\.observedAt).max()
+        if let newest, let observed = window.observedAt, observed < newest { return }
+        limits.removeAll(where: isSameWindow)
+        limits.append(window)
     }
 
     /// Aggregated totals for everything older than the retention window.

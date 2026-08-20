@@ -149,9 +149,29 @@ struct RateWindow: Sendable, Hashable, Codable {
     }
 
     /// Whether the window it describes has not already rolled over.
+    ///
+    /// A reading with no reset time — a sampled gauge rather than a dated one —
+    /// can only be trusted for as long as the window it measures. A five-hour
+    /// figure written six hours ago describes a window that no longer exists,
+    /// and drawing it would be worse than drawing nothing.
     func isCurrent(now: Date = Date()) -> Bool {
-        guard let resetsAt else { return true }
-        return resetsAt > now
+        if let resetsAt { return resetsAt > now }
+        guard let observedAt, let minutes else { return true }
+        return now.timeIntervalSince(observedAt) < Double(minutes) * 60
+    }
+
+    /// How old the reading is against the window it describes. A weekly figure
+    /// from this morning is fresh; a five-hour figure from this morning is not.
+    func age(now: Date = Date()) -> TimeInterval? {
+        observedAt.map { now.timeIntervalSince($0) }
+    }
+
+    /// Whether the age is worth printing beside the figure. Proportional to the
+    /// window, so the same rule serves a five-hour gauge and a monthly one.
+    func isStale(now: Date = Date()) -> Bool {
+        guard let age = age(now: now) else { return false }
+        let window = Double(minutes ?? 300) * 60
+        return age > max(window / 10, 15 * 60)
     }
 }
 
