@@ -8,6 +8,10 @@ struct TokenCounts: Sendable, Hashable, Codable {
     var output: Int = 0
     var cacheCreation: Int = 0
     var cacheRead: Int = 0
+    /// The share of `cacheCreation` written with a one-hour TTL, which bills at
+    /// twice the input rate instead of 1.25×. A subset, never an addition — it
+    /// stays out of `total` and `billable` for exactly that reason.
+    var cacheCreation1h: Int = 0
 
     /// What the provider actually billed against the context window.
     var total: Int { input + output + cacheCreation + cacheRead }
@@ -15,12 +19,38 @@ struct TokenCounts: Sendable, Hashable, Codable {
     /// Tokens that cost full price — the ones that feed digivolution.
     var billable: Int { input + output + cacheCreation }
 
+    /// Cache writes on the cheaper five-minute TTL.
+    var cacheCreation5m: Int { max(0, cacheCreation - cacheCreation1h) }
+
+    init(
+        input: Int = 0, output: Int = 0, cacheCreation: Int = 0,
+        cacheRead: Int = 0, cacheCreation1h: Int = 0
+    ) {
+        self.input = input
+        self.output = output
+        self.cacheCreation = cacheCreation
+        self.cacheRead = cacheRead
+        self.cacheCreation1h = cacheCreation1h
+    }
+
+    /// Decoded field by field: these are persisted inside the scan cache, and a
+    /// cache that will not decode takes the all-time archive down with it.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        input = try c.decodeIfPresent(Int.self, forKey: .input) ?? 0
+        output = try c.decodeIfPresent(Int.self, forKey: .output) ?? 0
+        cacheCreation = try c.decodeIfPresent(Int.self, forKey: .cacheCreation) ?? 0
+        cacheRead = try c.decodeIfPresent(Int.self, forKey: .cacheRead) ?? 0
+        cacheCreation1h = try c.decodeIfPresent(Int.self, forKey: .cacheCreation1h) ?? 0
+    }
+
     static func + (lhs: TokenCounts, rhs: TokenCounts) -> TokenCounts {
         TokenCounts(
             input: lhs.input + rhs.input,
             output: lhs.output + rhs.output,
             cacheCreation: lhs.cacheCreation + rhs.cacheCreation,
-            cacheRead: lhs.cacheRead + rhs.cacheRead
+            cacheRead: lhs.cacheRead + rhs.cacheRead,
+            cacheCreation1h: lhs.cacheCreation1h + rhs.cacheCreation1h
         )
     }
 

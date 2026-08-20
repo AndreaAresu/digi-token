@@ -72,6 +72,9 @@ enum SelfTest {
         section("Save compatibility")
         testSaveCompatibility()
 
+        section("Pricing")
+        testPricing()
+
         section("Coach")
         testCoach()
 
@@ -531,6 +534,57 @@ enum SelfTest {
     /// Swift's synthesized decoder calls `decode` for non-optional properties
     /// and ignores their defaults. The store read that as "no save" and started
     /// a fresh egg, wiping a partner that had been growing for days.
+    /// Pins the cost estimate to the rates actually published, because the one
+    /// thing this figure must not be is confidently wrong.
+    ///
+    /// The numbers below were checked against the real logs on this machine: a
+    /// day priced at the old Opus rate read $269 where the current rate gives
+    /// $98, and every cache write Claude Code makes here carries the one-hour
+    /// TTL, which bills at 2× input rather than 1.25×.
+    static func testPricing() {
+        let opus5 = ModelPricing.rate(for: "claude-opus-5")
+        expect(opus5.input == 5 && opus5.output == 25, "Opus 4.6 and later is priced at $5/$25")
+        expect(opus5.cacheWrite == 6.25, "a five-minute cache write is 1.25× input")
+        expect(opus5.cacheWrite1h == 10, "a one-hour cache write is 2× input")
+        expect(opus5.cacheRead == 0.5, "a cache read is 0.1× input")
+
+        let opus4 = ModelPricing.rate(for: "claude-opus-4-1-20250805")
+        expect(opus4.input == 15, "the generation before it keeps the price it had")
+
+        let sonnet = ModelPricing.rate(for: "claude-sonnet-5")
+        expect(sonnet.input == 3 && sonnet.output == 15, "Sonnet is priced at $3/$15")
+        let haiku = ModelPricing.rate(for: "claude-haiku-4-5")
+        expect(haiku.input == 1 && haiku.output == 5, "Haiku is priced at $1/$5")
+
+        // One turn the size of a real one, hand-checked:
+        // 1M output at $25 + 1M 1h-write at $10 + 10M read at $0.50 = $40.
+        let turn = TokenCounts(
+            input: 0, output: 1_000_000, cacheCreation: 1_000_000,
+            cacheRead: 10_000_000, cacheCreation1h: 1_000_000
+        )
+        let cost = ModelPricing.cost(model: "claude-opus-5", counts: turn)
+        expect(abs(cost - 40) < 0.001, "a turn costs what its parts add up to ($\(String(format: "%.2f", cost)))")
+
+        // The same turn on the short TTL is cheaper, and by exactly the gap
+        // between the two multipliers.
+        let shortTTL = TokenCounts(
+            input: 0, output: 1_000_000, cacheCreation: 1_000_000, cacheRead: 10_000_000
+        )
+        let shortCost = ModelPricing.cost(model: "claude-opus-5", counts: shortTTL)
+        expect(abs((cost - shortCost) - 3.75) < 0.001, "the TTL split is what separates the two")
+
+        // A cache-write breakdown is a subset of the total, never an addition.
+        expect(turn.billable == 2_000_000, "the 1h share does not inflate the billable count")
+        expect(turn.cacheCreation5m == 0, "a fully 1h write leaves no short-TTL remainder")
+
+        // Counts are persisted inside the scan cache; a cache written before
+        // the TTL split existed has to keep decoding.
+        let legacy = #"{"input":10,"output":20,"cacheCreation":30,"cacheRead":40}"#
+        let decoded = try? JSONDecoder().decode(TokenCounts.self, from: Data(legacy.utf8))
+        expect(decoded?.cacheRead == 40, "a scan cache without the TTL split still decodes")
+        expect(decoded?.cacheCreation1h == 0, "and reads as short-TTL, which is what it was")
+    }
+
     static func testSaveCompatibility() {
         // Exactly the shape a save had before the shop existed.
         let legacy = """
