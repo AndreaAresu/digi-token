@@ -86,12 +86,22 @@ final class UsageMonitor {
             for provider in providers where provider.isAvailable() {
                 guard let cache = caches[provider.id] else { continue }
                 let events = provider.scan(cache: cache)
+                // Only when nothing is known yet: the scan above already picks
+                // up every limit record in bytes it reads, so this is the
+                // one-off catch-up for logs that were read before the app knew
+                // to look for them.
+                if cache.knownLimits.isEmpty { provider.backfillLimits(cache: cache) }
                 cache.forgetMissingFiles()
                 let archive = cache.archive
                 guard !events.isEmpty || archive.eventCount > 0 else { continue }
-                snapshot.providers[provider.id] = UsageAggregator.summarize(
+                var usage = UsageAggregator.summarize(
                     provider: provider.id, events: events, archive: archive
                 )
+                // Read from the cache rather than from this scan: a refresh that
+                // found no new bytes read no records, and the tool's last
+                // reading is still its last reading.
+                usage.limits = cache.knownLimits
+                snapshot.providers[provider.id] = usage
                 byProvider[provider.id] = events
                 cache.persist()
             }

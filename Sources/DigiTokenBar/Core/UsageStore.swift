@@ -78,6 +78,10 @@ enum UsageAggregator {
         var projectTotals = archive.projects
         var projectToday: [String: TokenCounts] = [:]
         var projectSeen: [String: Date] = [:]
+        // Retained events only, so the busiest week is the busiest week the
+        // cache still remembers one by one — the archive keeps totals, not
+        // shapes. Retention outlasts a quarter, which is plenty of weeks.
+        var perWeek: [Date: Int] = [:]
 
         for event in events {
             usage.allTime += event.counts
@@ -101,6 +105,9 @@ enum UsageAggregator {
                 usage.todayCost += ModelPricing.cost(model: event.model, counts: event.counts)
             }
             if event.timestamp >= startOfWeek { usage.week += event.counts }
+            if let week = calendar.dateInterval(of: .weekOfYear, for: event.timestamp)?.start {
+                perWeek[week, default: 0] += event.counts.billable
+            }
             if event.timestamp >= startOfMonth {
                 usage.month += event.counts
                 usage.monthCost += ModelPricing.cost(model: event.model, counts: event.counts)
@@ -124,6 +131,13 @@ enum UsageAggregator {
         let allBlocks = blocks(from: events, calendar: calendar)
         usage.currentBlock = allBlocks.last.flatMap { $0.isActive ? $0 : nil }
         usage.recentBlocks = Array(allBlocks.suffix(24))
+
+        // The only ceiling this app can honestly point at. Neither tool writes
+        // its allowance in tokens, so "your busiest window so far" is offered
+        // instead of a percentage of a limit nobody published: it is a thing
+        // that actually happened, and it is labelled as such.
+        usage.peakBlock = allBlocks.map(\.counts.billable).max() ?? 0
+        usage.peakWeek = perWeek.values.max() ?? 0
         return usage
     }
 

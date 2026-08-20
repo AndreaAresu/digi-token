@@ -217,6 +217,53 @@ direction and then watching the roll ignore you would be the worst of both
 designs. It is only spent when the rung can actually honour it — many early
 stages carry no field data, and a purchase should not evaporate on one of them.
 
+## Limits, and what can honestly be said about them
+
+The question this section exists to answer is "how much have I got left", and
+the answer differs by tool because what the tools write down differs.
+
+**Codex writes its own rate-limit state onto every turn** — how much of each
+window is used, how long the window is, when it rolls over. That is a reading,
+so it is shown as a gauge, with the time the tool wrote it whenever that is more
+than a couple of hours ago. A percentage from three weeks ago describes three
+weeks ago, and says so.
+
+**Claude Code keeps its own copy of what `/usage` reports** — in `~/.claude.json`
+under `cachedUsageUtilization`, with the five-hour and weekly windows as
+percentages and their reset times. That is the same figure the CLI prints, so it
+is a real gauge and still entirely on this machine.
+
+The catch is freshness: the CLI refreshes that cache when it fetches usage, not
+on a timer, so a reading can be days old. Each window carries its own
+`resets_at`, so an expired one is **not** shown — a five-hour window from a
+fortnight ago describes nothing. The section says how old the reading is and
+that asking Claude Code for its usage will refresh it, rather than going quiet
+and looking broken.
+
+The transcripts carry one further signal: when a limit actually stops a turn,
+Claude Code records the window type and when it clears. While such a refusal is
+still in force the pane shows it as the full bar it is.
+
+What is offered instead, for both tools, is a **comparison against your own
+record**: this window against the busiest window on file, this week against the
+busiest week. It is labelled as a high-water mark rather than a limit, because
+that is what it is — something that happened, not something you are entitled to.
+
+The alternative was to guess a quota from the plan tier and show a confident
+bar against it. Every number in this app is one you can check; a bar against an
+invented ceiling is not.
+
+Nothing is fetched over the network for any of this. The documented Anthropic
+usage API answers a different question — it reports API-organisation spend and
+needs an admin key, not a subscription's rate-limit utilisation — and the
+endpoint the CLI itself calls is internal and authenticates as you. Reading the
+file the tool already wrote costs nothing and keeps the promise in the footer.
+
+Readings are kept in the scan cache. Scanning is incremental, so a refresh that
+finds no new bytes reads no records, and the tool's last reading is still its
+last reading. When the cache has never seen one — an app that only just learned
+to look — each provider reads the tail of its most recent logs once to catch up.
+
 ## The coach
 
 A section in the Usage tab that reads the same events the partner grows on and

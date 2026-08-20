@@ -12,6 +12,7 @@ final class UsagePane: NSView {
     private let blockBar = BarView()
     private let blockStats = UI.label("", size: 10, color: .secondaryLabelColor, mono: true)
     private let histogram = HistogramView()
+    private let limits = LimitsSection()
     private let emptyLabel = UI.label("", size: 11, color: .secondaryLabelColor, align: .center)
     private let coach = CoachSection()
     private let privacyNote = UI.label(
@@ -64,7 +65,7 @@ final class UsagePane: NSView {
         UI.wraps(privacyNote, lines: 3)
 
         contentStack = UI.stack(.vertical, spacing: 12, [
-            picker, row1, row2, blockCard, historyStack, projectsSection,
+            picker, row1, row2, blockCard, limits, historyStack, projectsSection,
             coach, emptyLabel, privacyNote,
         ])
         addSubview(contentStack)
@@ -80,6 +81,7 @@ final class UsagePane: NSView {
             row1.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
             row2.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
             blockCard.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
+            limits.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
             historyStack.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
             blockBar.widthAnchor.constraint(equalTo: blockInner.widthAnchor),
             histogram.widthAnchor.constraint(equalTo: historyStack.widthAnchor),
@@ -108,6 +110,7 @@ final class UsagePane: NSView {
 
         picker.isHidden = providers.count < 2
         blockCard.isHidden = !hasData
+        limits.isHidden = !hasData
         historyStack.isHidden = !hasData
         emptyLabel.isHidden = hasData
         coach.isHidden = !hasData
@@ -155,6 +158,8 @@ final class UsagePane: NSView {
         } else {
             blockCard.isHidden = true
         }
+
+        limits.show(usage)
 
         let recent = usage.recentBlocks.suffix(14)
         histogram.values = recent.map(\.counts.billable)
