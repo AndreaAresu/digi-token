@@ -104,6 +104,13 @@ final class UsagePane: NSView {
     /// folded into one "other" row so the total still adds up.
     private let projectLimit = 6
 
+    private static let costTip = """
+        What these tokens would have cost at published API rates — a comparison, \
+        not a bill: a subscription does not charge per token.
+        Unlike the token figure above it, the price counts cache reads too, at a \
+        tenth of the input rate.
+        """
+
     func refresh() {
         let providers = monitor.snapshot.detected
         let hasData = !providers.isEmpty
@@ -140,6 +147,13 @@ final class UsagePane: NSView {
             value: TokenFormatter.short(usage.month.billable),
             hint: TokenFormatter.cost(usage.monthCost)
         )
+        // The two figures on a cost tile do not measure the same thing, and the
+        // gap between them is large enough to look like a mistake: the big
+        // number is billable tokens, the price underneath is every token at
+        // list rate — cache reads included, which is where most of a long
+        // session's money actually goes.
+        tiles[0].toolTip = Self.costTip
+        tiles[2].toolTip = Self.costTip
         tiles[3].set(
             value: TokenFormatter.short(usage.allTime.billable),
             hint: "\(usage.sessionCount) sessions"

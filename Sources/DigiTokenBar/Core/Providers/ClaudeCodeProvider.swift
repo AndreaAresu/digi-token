@@ -410,11 +410,19 @@ struct ClaudeCodeProvider: UsageProvider {
               let usage = message["usage"] as? [String: Any]
         else { return nil }
 
+        // Claude Code writes the TTL split beside the total. It matters for
+        // cost and nothing else: a one-hour cache write bills at twice the
+        // input rate, a five-minute one at 1.25×, and this session's writes are
+        // almost entirely the expensive kind. An older transcript without the
+        // breakdown reads as zero and is priced at the five-minute rate, which
+        // is what it was.
+        let ttlSplit = usage["cache_creation"] as? [String: Any]
         let counts = TokenCounts(
             input: usage["input_tokens"] as? Int ?? 0,
             output: usage["output_tokens"] as? Int ?? 0,
             cacheCreation: usage["cache_creation_input_tokens"] as? Int ?? 0,
-            cacheRead: usage["cache_read_input_tokens"] as? Int ?? 0
+            cacheRead: usage["cache_read_input_tokens"] as? Int ?? 0,
+            cacheCreation1h: ttlSplit?["ephemeral_1h_input_tokens"] as? Int ?? 0
         )
         guard counts.total > 0 else { return nil }
 
