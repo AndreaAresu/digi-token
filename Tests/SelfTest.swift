@@ -1415,6 +1415,73 @@ enum SelfTest {
             "and the same hour is nothing on a weekly one"
         )
 
+        // The reset the samples can support: utilisation at zero and then rising
+        // is the first use inside a fresh window, so five hours from there is
+        // when it turns over. Checked against this machine, the estimate landed
+        // four minutes from what Claude itself reported.
+        let born = """
+        {"version":2,"samples":[\
+        {"t":1787209000000,"u":{"fh":88,"sd":30}},\
+        {"t":1787209900000,"u":{"fh":0,"sd":30}},\
+        {"t":1787210800000,"u":{"fh":12,"sd":31}},\
+        {"t":1787211700000,"u":{"fh":52,"sd":31}}]}
+        """
+        let withReset = ClaudeCodeProvider.planUsage(in: Data(born.utf8))
+        guard let five = withReset.first(where: { $0.minutes == 300 }) else {
+            expect(false, "the five-hour window parsed")
+            return
+        }
+        // The crossing sits between 1787209900 and 1787210800; the midpoint is
+        // the least-biased guess at when the window actually opened.
+        expect(
+            five.resetsAt.map { abs($0.timeIntervalSince1970 - (1_787_210_350 + 5 * 3600)) < 1 } ?? false,
+            "the reset is five hours from the midpoint of the crossing"
+        )
+        expect(five.resetIsApproximate, "and it is marked as worked out, not reported")
+        expect(
+            withReset.first(where: { $0.minutes == 10_080 })?.resetsAt == nil,
+            "the weekly window gets no reset from this: it is not anchored to first use"
+        )
+
+        // An approximate reset must never decide whether a reading still counts.
+        // Being ten minutes early would otherwise blank a perfectly good gauge.
+        let earlyGuess = RateWindow(
+            kind: "k", usedFraction: 0.5, minutes: 300,
+            resetsAt: Date(timeIntervalSince1970: 1_000),
+            observedAt: Date(timeIntervalSince1970: 900), resetIsApproximate: true
+        )
+        expect(
+            earlyGuess.isCurrent(now: Date(timeIntervalSince1970: 1_200)),
+            "a guessed reset that has passed does not hide a fresh reading"
+        )
+        let reported = RateWindow(
+            kind: "k", usedFraction: 0.5, minutes: 300,
+            resetsAt: Date(timeIntervalSince1970: 1_000),
+            observedAt: Date(timeIntervalSince1970: 900)
+        )
+        expect(
+            !reported.isCurrent(now: Date(timeIntervalSince1970: 1_200)),
+            "a reported one still does"
+        )
+
+        // The weekly allowance runs on a fixed schedule, so a reset reported
+        // weeks ago still gives the weekday and the hour. Verified against this
+        // machine: a copy cached on 4 August said Saturday 03:00, and Claude's
+        // own panel says "Resets Sat 2:59 AM".
+        let stale = Date(timeIntervalSince1970: 1_786_237_200)
+        let now = stale.addingTimeInterval(12 * 86_400)
+        let rolled = ClaudeCodeProvider.rollForward(stale, everyMinutes: 10_080, now: now)
+        expect(rolled > now, "a rolled reset is in the future")
+        expect(
+            rolled.timeIntervalSince(stale).truncatingRemainder(dividingBy: 7 * 86_400) == 0,
+            "and lands a whole number of weeks on, keeping the weekday and hour"
+        )
+        expect(
+            ClaudeCodeProvider.rollForward(now.addingTimeInterval(60), everyMinutes: 10_080, now: now)
+                == now.addingTimeInterval(60),
+            "a reset still in the future is left alone"
+        )
+
         expect(
             ClaudeCodeProvider.planUsage(in: Data(#"{"version":2,"samples":[]}"#.utf8)).isEmpty,
             "a history with no samples yields nothing"
@@ -1906,6 +1973,22 @@ enum SelfTest {
         if !found {
             print("  (no local AI-tool logs found — parser checks above still ran)")
             return
+        }
+
+        // The daily chart needs every day in the span, worked or not — a series
+        // that skips the quiet ones is not a series over time.
+        for usage in summaries {
+            expect(
+                usage.recentDays.count == UsageAggregator.recentDayCount,
+                "\(usage.provider.displayName): the chart covers \(UsageAggregator.recentDayCount) days "
+                    + "(\(usage.recentDays.count))"
+            )
+            let ordered = zip(usage.recentDays, usage.recentDays.dropFirst()).allSatisfy { $0.date < $1.date }
+            expect(ordered, "\(usage.provider.displayName): the days run oldest to newest")
+            expect(
+                usage.recentDays.last.map { Calendar.current.isDateInToday($0.date) } ?? false,
+                "\(usage.provider.displayName): the last bar is today"
+            )
         }
 
         // The pace bars compare against a high-water mark, so the mark has to

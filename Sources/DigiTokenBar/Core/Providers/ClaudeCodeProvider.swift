@@ -39,16 +39,33 @@ struct ClaudeCodeProvider: UsageProvider {
         // Read every time rather than only on a backfill: `.claude.json` is
         // rewritten by the CLI on its own schedule, with no relation to the
         // transcripts this scan resumes through.
+        // The cached copy is usually the stale one, but it is the only source
+        // that carries reset times, and a weekly reset keeps its weekday and
+        // hour however old the reading is.
+        var schedule: [Int: Date] = [:]
         for file in Self.configFiles() {
             guard let data = try? Data(contentsOf: file) else { continue }
-            for window in Self.cachedUtilization(in: data) { cache.recordLimit(window) }
+            for window in Self.cachedUtilization(in: data) {
+                cache.recordLimit(window)
+                if let minutes = window.minutes, minutes >= 1_440, let reset = window.resetsAt {
+                    schedule[minutes] = reset
+                }
+            }
         }
+
         // The desktop app samples the same two windows every few minutes, which
-        // is a great deal fresher than the CLI's cached copy. Both write the
-        // same canonical ids, so the newest reading wins on its own.
+        // is a great deal fresher. Both write the same canonical ids, so the
+        // newest reading wins on its own — and the fresh figure inherits the
+        // schedule the stale one knew about.
         for file in Self.planUsageFiles() {
             guard let data = try? Data(contentsOf: file) else { continue }
-            for window in Self.planUsage(in: data) { cache.recordLimit(window) }
+            for var window in Self.planUsage(in: data) {
+                if window.resetsAt == nil, let minutes = window.minutes, let known = schedule[minutes] {
+                    window.resetsAt = Self.rollForward(known, everyMinutes: minutes)
+                    window.resetIsApproximate = true
+                }
+                cache.recordLimit(window)
+            }
         }
 
         var events: [UsageEvent] = []
@@ -107,14 +124,21 @@ struct ClaudeCodeProvider: UsageProvider {
     /// No reset time is recorded here, so freshness is judged by the age of the
     /// sample against the window it describes — see `RateWindow.isCurrent`.
     ///
-    /// It is tempting to derive the reset from the samples: the utilisation
-    /// falling between two of them marks a rollover, so the window would end
-    /// five hours after that. It was tried against this machine's history and
-    /// it is wrong. The last rollover in the file ran 100% → 0% between 04:02
-    /// and 04:23, which puts the end of that window at 09:23 — while Claude
-    /// itself was reporting the window resetting at about 13:58. Whatever the
-    /// five-hour allowance is measured over, it is not a fixed block starting at
-    /// the last reset, so nothing here pretends to know when it ends.
+    /// The reset time is not in the file either, but the samples do show the
+    /// window *being born*: utilisation sitting at zero and then rising is the
+    /// first use inside a fresh window, and five hours from there is when it
+    /// ends.
+    ///
+    /// Checked against this machine: the jump from 0% to 12% happened between
+    /// the 08:56 and 09:11 samples, putting the end between 13:56 and 14:11 —
+    /// and Claude itself reported 13:58. So the estimate is good to the sampling
+    /// interval, a quarter of an hour, and it is marked approximate because that
+    /// is exactly what it is.
+    ///
+    /// Note what does *not* work: taking the last rollover (100% → 0%) and
+    /// adding five hours. That gave 09:23 against a real 13:58, because a window
+    /// does not start when the previous one expires — it starts at the next
+    /// thing you do.
     static func planUsageFiles() -> [URL] {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
         return support
@@ -135,17 +159,65 @@ struct ClaudeCodeProvider: UsageProvider {
         func window(_ key: String, minutes: Int) -> RateWindow? {
             guard let percent = used[key] as? Double ?? (used[key] as? Int).map(Double.init)
             else { return nil }
+            // Only the five-hour window is anchored to when you started using
+            // it. The weekly one runs on a fixed schedule and is handled by
+            // rolling its last reported reset forward — see `rollForward`.
+            let start = percent > 0 && minutes == 300 ? windowStart(key, in: samples) : nil
             return RateWindow(
                 kind: canonicalKind(minutes: minutes, scope: nil, fallback: key),
                 usedFraction: max(0, min(1, percent / 100)),
                 minutes: minutes,
-                resetsAt: nil,
+                resetsAt: start?.addingTimeInterval(Double(minutes) * 60),
                 blocked: percent >= 100,
-                observedAt: observed
+                observedAt: observed,
+                resetIsApproximate: start != nil
             )
         }
 
         return [window("fh", minutes: 300), window("sd", minutes: 10_080)].compactMap { $0 }
+    }
+
+    /// Moves a reset that has already happened forward by whole windows.
+    ///
+    /// The weekly allowance runs on a fixed weekly schedule rather than from
+    /// when you first used it, so a reset time reported weeks ago still gives
+    /// the hour and the weekday. Checked here: the copy cached on 4 August said
+    /// Saturday 03:00, rolled forward it gives Saturday 22 August 03:00, and
+    /// Claude's own panel says "Resets Sat 2:59 AM".
+    ///
+    /// Deliberately not applied to the five-hour window, which is not on a grid
+    /// — the same arithmetic there was out by more than four hours.
+    static func rollForward(_ reset: Date, everyMinutes minutes: Int, now: Date = Date()) -> Date {
+        let window = Double(minutes) * 60
+        guard window > 0, reset <= now else { return reset }
+        let periods = (now.timeIntervalSince(reset) / window).rounded(.down) + 1
+        return reset.addingTimeInterval(periods * window)
+    }
+
+    /// When the window now running started, as far as the samples can tell.
+    ///
+    /// The last moment utilisation was zero and the first moment it was not
+    /// bracket the first use inside this window; the answer is somewhere in
+    /// between, so the midpoint is taken. Returns nil when no such crossing is
+    /// in the file — the app may simply have been closed through it — and the
+    /// caller then shows the figure with no reset rather than a made-up one.
+    private static func windowStart(_ key: String, in samples: [[String: Any]]) -> Date? {
+        func percent(_ sample: [String: Any]) -> Double? {
+            guard let used = sample["u"] as? [String: Any] else { return nil }
+            return used[key] as? Double ?? (used[key] as? Int).map(Double.init)
+        }
+        func stamp(_ sample: [String: Any]) -> Date? {
+            (sample["t"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) }
+        }
+
+        for index in stride(from: samples.count - 1, to: 0, by: -1) {
+            guard let now = percent(samples[index]), now > 0,
+                  let before = percent(samples[index - 1]), before == 0,
+                  let opened = stamp(samples[index]), let closed = stamp(samples[index - 1])
+            else { continue }
+            return Date(timeIntervalSince1970: (opened.timeIntervalSince1970 + closed.timeIntervalSince1970) / 2)
+        }
+        return nil
     }
 
     /// Claude Code's own copy of what `/usage` shows: how much of the five-hour

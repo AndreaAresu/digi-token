@@ -183,15 +183,21 @@ final class BarView: NSView {
     }
 }
 
-/// The sparkline of recent 5-hour windows.
-final class HistogramView: NSView {
-    var values: [Int] = [] {
+/// A bar per day of the last fortnight.
+///
+/// It used to be a bar per five-hour window, which read as a time series and was
+/// not one: a window only exists on a day you worked, so two neighbouring bars
+/// could be five hours or five days apart and a fortnight off collapsed to
+/// nothing. Days have a real axis — the quiet ones are drawn as the gaps they
+/// are, and each bar says its date on hover.
+final class HistogramView: NSView, NSViewToolTipOwner {
+    var days: [DayUsage] = [] {
         didSet {
             needsDisplay = true
             describe()
+            rebuildToolTips()
         }
     }
-    var activeIndex: Int? { didSet { describe() } }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -204,36 +210,81 @@ final class HistogramView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     /// Bars carry their meaning in their heights, which a screen reader cannot
-    /// see. Said out loud it is a range and a peak, which is what the shape is
-    /// for anyway.
+    /// see. Said out loud it is a total, a peak and how many days were worked.
     private func describe() {
-        setAccessibilityLabel("Recent 5-hour windows")
-        guard let peak = values.max(), !values.isEmpty else {
-            setAccessibilityValue("No windows yet")
+        setAccessibilityLabel("Daily billable tokens, last \(days.count) days")
+        guard let peak = days.map(\.billable).max(), peak > 0 else {
+            setAccessibilityValue("Nothing yet")
             return
         }
-        var said = "\(values.count) windows, busiest \(TokenFormatter.short(peak)) billable"
-        if let activeIndex, values.indices.contains(activeIndex) {
-            said += ", current window \(TokenFormatter.short(values[activeIndex]))"
+        let worked = days.filter { $0.billable > 0 }.count
+        var said = "\(worked) of \(days.count) days worked, busiest \(TokenFormatter.short(peak))"
+        if let today = days.last {
+            said += ", today \(TokenFormatter.short(today.billable))"
         }
         setAccessibilityValue(said)
     }
 
+    /// One tooltip per bar, rebuilt whenever the data or the geometry changes —
+    /// a chart this small has room for the shape and nowhere to print a date.
+    private func rebuildToolTips() {
+        removeAllToolTips()
+        guard !days.isEmpty, bounds.width > 0 else { return }
+        let gap: CGFloat = 3
+        let width = (bounds.width - gap * CGFloat(days.count - 1)) / CGFloat(days.count)
+        for index in days.indices {
+            let rect = NSRect(
+                x: CGFloat(index) * (width + gap), y: 0, width: width + gap, height: bounds.height
+            )
+            _ = addToolTip(rect, owner: self, userData: nil)
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        rebuildToolTips()
+    }
+
+    func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData data: UnsafeMutableRawPointer?) -> String {
+        let gap: CGFloat = 3
+        let width = (bounds.width - gap * CGFloat(max(days.count - 1, 1))) / CGFloat(max(days.count, 1))
+        let index = Int(point.x / max(width + gap, 1))
+        guard days.indices.contains(index) else { return "" }
+        let day = days[index]
+        let stamp = Self.dayFormatter.string(from: day.date)
+        return day.billable > 0
+            ? "\(stamp) · \(TokenFormatter.grouped(day.billable)) billable"
+            : "\(stamp) · nothing"
+    }
+
+    private static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate("EEE d MMM")
+        return formatter
+    }()
+
     override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: 52) }
 
     override func draw(_ dirtyRect: NSRect) {
-        guard !values.isEmpty else { return }
-        let peak = CGFloat(max(1, values.max() ?? 1))
+        guard !days.isEmpty else { return }
+        let peak = CGFloat(max(1, days.map(\.billable).max() ?? 1))
         let gap: CGFloat = 3
-        let width = (bounds.width - gap * CGFloat(values.count - 1)) / CGFloat(values.count)
+        let width = (bounds.width - gap * CGFloat(days.count - 1)) / CGFloat(days.count)
 
-        for (index, value) in values.enumerated() {
-            let height = max(3, bounds.height * CGFloat(value) / peak)
+        for (index, day) in days.enumerated() {
+            // A day with no work is drawn as a sliver of track rather than
+            // skipped: the gap is the point of a daily chart.
+            let height = day.billable > 0
+                ? max(3, bounds.height * CGFloat(day.billable) / peak)
+                : 2
             let rect = NSRect(
                 x: CGFloat(index) * (width + gap), y: 0, width: width, height: height
             )
-            let isActive = index == activeIndex
-            (isActive ? Theme.accent : Theme.accent.withAlphaComponent(0.45)).setFill()
+            let isToday = index == days.count - 1
+            let colour = day.billable > 0
+                ? (isToday ? Theme.accent : Theme.accent.withAlphaComponent(0.45))
+                : NSColor.labelColor.withAlphaComponent(0.15)
+            colour.setFill()
             NSBezierPath(roundedRect: rect, xRadius: 2, yRadius: 2).fill()
         }
     }

@@ -52,7 +52,7 @@ final class UsagePane: NSView {
         blockCard.translatesAutoresizingMaskIntoConstraints = false
 
         let historyStack = UI.stack(.vertical, spacing: 5, [
-            UI.caption("Recent 5-hour windows"), histogram,
+            UI.caption("Last 14 days"), histogram,
         ])
 
         projectStack = UI.stack(.vertical, spacing: 5, [])
@@ -147,23 +147,35 @@ final class UsagePane: NSView {
 
         if let block = usage.currentBlock {
             blockCard.isHidden = false
+
+            // Two clocks in one panel is what makes a panel confusing. When the
+            // tool has told us when its own window turns over, that is the one
+            // shown here too — ours is derived from these logs alone and the
+            // allowance covers work this app cannot see.
+            let toolReset = usage.limits
+                .filter { $0.isCurrent() && ($0.minutes ?? .max) <= 1_440 }
+                .compactMap(\.resetsAt)
+                .min()
+            let remaining = toolReset.map { max(0, $0.timeIntervalSinceNow) } ?? block.remaining
+            let projected = toolReset == nil
+                ? block.projectedTotal
+                : block.counts.billable + Int(block.burnRate * remaining / 3600)
+
             blockHeader.stringValue =
-                "CURRENT WINDOW · \(TokenFormatter.duration(block.remaining)) left"
+                "CURRENT WINDOW · \(TokenFormatter.duration(remaining)) left"
             blockHeader.textColor = Theme.accent
             blockBar.value = block.elapsed / UsageAggregator.blockDuration
             blockStats.stringValue =
                 "\(TokenFormatter.short(block.counts.billable)) used   ·   "
                 + "\(TokenFormatter.short(Int(block.burnRate)))/h   ·   "
-                + "~\(TokenFormatter.short(block.projectedTotal)) projected"
+                + "~\(TokenFormatter.short(projected)) projected"
         } else {
             blockCard.isHidden = true
         }
 
         limits.show(usage)
 
-        let recent = usage.recentBlocks.suffix(14)
-        histogram.values = recent.map(\.counts.billable)
-        histogram.activeIndex = recent.last?.isActive == true ? recent.count - 1 : nil
+        histogram.days = usage.recentDays
 
         rebuildProjects(usage)
         // The selected tool's events, not the whole stream. Cache behaviour,

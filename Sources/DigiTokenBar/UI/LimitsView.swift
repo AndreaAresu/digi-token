@@ -50,28 +50,29 @@ final class LimitsSection: NSView {
         let expired = usage.limits.filter { !$0.isCurrent() }
         for window in live { add(gauge: window) }
 
-        // The pace rows are always shown. They are the part that exists for
-        // every tool, because they are measured from usage rather than read out
-        // of a tool's own bookkeeping.
-        // Only while a window is actually open. "0 of 234K busiest" under a
-        // closed window is a bar that measures nothing.
-        if usage.peakBlock > 0, let block = usage.currentBlock {
-            let used = block.counts.billable
-            add(
-                label: "This 5-hour window",
-                value: "\(TokenFormatter.short(used)) of \(TokenFormatter.short(usage.peakBlock)) busiest",
-                fraction: Double(used) / Double(usage.peakBlock),
-                tint: Theme.accent
-            )
-        }
-        if usage.peakWeek > 0 {
-            add(
-                label: "This week",
-                value: "\(TokenFormatter.short(usage.week.billable)) of "
-                    + "\(TokenFormatter.short(usage.peakWeek)) busiest",
-                fraction: Double(usage.week.billable) / Double(usage.peakWeek),
-                tint: Theme.accent
-            )
+        // The comparison against your own record is a *fallback*, not a
+        // companion. Beside a real gauge it invites the wrong reading — "1.1M of
+        // 1.2M busiest" looks like 92% of an allowance, and it is 92% of a
+        // personal best. So it appears only when the tool has told us nothing.
+        if live.isEmpty {
+            if usage.peakBlock > 0, let block = usage.currentBlock {
+                let used = block.counts.billable
+                add(
+                    label: "This 5-hour window",
+                    value: "\(TokenFormatter.short(used)) of \(TokenFormatter.short(usage.peakBlock)) busiest",
+                    fraction: Double(used) / Double(usage.peakBlock),
+                    tint: Theme.accent
+                )
+            }
+            if usage.peakWeek > 0 {
+                add(
+                    label: "This week",
+                    value: "\(TokenFormatter.short(usage.week.billable)) of "
+                        + "\(TokenFormatter.short(usage.peakWeek)) busiest",
+                    fraction: Double(usage.week.billable) / Double(usage.peakWeek),
+                    tint: Theme.accent
+                )
+            }
         }
 
         note.stringValue = Self.note(live: live, expired: expired, tool: usage.provider.displayName)
@@ -82,8 +83,8 @@ final class LimitsSection: NSView {
     /// and how to refresh it. A section that simply goes quiet looks broken.
     private static func note(live: [RateWindow], expired: [RateWindow], tool: String) -> String {
         if !live.isEmpty {
-            return "The gauge is what the tool itself last wrote down. The bars below it compare "
-                + "against your own record, which is not a limit."
+            return "Percentages are the tool's own. A ~ marks a reset worked out from its "
+                + "samples rather than reported, which is good to about a quarter of an hour."
         }
         if let last = expired.compactMap(\.observedAt).max() {
             return "\(tool) last wrote down its usage \(relative.localizedString(for: last, relativeTo: Date()))"
@@ -96,7 +97,7 @@ final class LimitsSection: NSView {
     }
 
     private func add(gauge window: RateWindow) {
-        let resets = window.resetsAt.map { Self.relative.localizedString(for: $0, relativeTo: Date()) }
+        let resets = Self.resetPhrase(for: window)
 
         if let fraction = window.usedFraction {
             var value = "\(Int((fraction * 100).rounded()))% used"
@@ -149,6 +150,39 @@ final class LimitsSection: NSView {
         row.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
         views.forEach { $0.widthAnchor.constraint(equalTo: row.widthAnchor).isActive = true }
     }
+
+    /// When the window turns over, said the way a person would.
+    ///
+    /// A five-hour window wants a clock time — "resets ~13:54" is what you plan
+    /// around. A weekly one wants a weekday, and anything longer is easier read
+    /// as a distance. The tilde is load-bearing: it says this time was worked
+    /// out from samples rather than reported.
+    private static func resetPhrase(for window: RateWindow) -> String? {
+        guard let reset = window.resetsAt else { return nil }
+        let mark = window.resetIsApproximate ? "~" : ""
+        let minutes = window.minutes ?? 300
+
+        if minutes <= 1_440 {
+            return mark + clock.string(from: reset)
+        }
+        if minutes <= 8 * 1_440 {
+            return mark + weekday.string(from: reset)
+        }
+        return relative.localizedString(for: reset, relativeTo: Date())
+    }
+
+    private static let clock: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        formatter.dateStyle = .none
+        return formatter
+    }()
+
+    private static let weekday: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate("EEE HH:mm")
+        return formatter
+    }()
 
     /// A gauge is only as current as the moment the tool wrote it. Saying when
     /// that was is the difference between a reading and a claim — a percentage
