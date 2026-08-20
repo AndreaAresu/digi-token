@@ -10,27 +10,9 @@ accumulating a "done" section — git remembers.
 
 ---
 
-## 1. The pricing table fails silently
-
-**The gap.** `ModelPricing.rate(for:)` matches the model id by substring and
-falls back to a Sonnet-shaped rate when nothing matches — without telling
-anyone. The coach then builds its strongest claim on that number: *"claude-opus-5
-is 85% of estimated cost"*. A model id the table has never seen would be priced
-as Sonnet, and with enough volume that can change **which** model comes out on
-top. The coach would be wrong with a straight face.
-
-**What it would take.** Two things, both in the grain of the project:
-
-- a test asserting every model id in the real logs on this machine matches a
-  table pattern — it fails the day a new model ships, which is exactly when you
-  want to hear about it;
-- a marker in the coach's card when some share of the cost was estimated with
-  the fallback rate.
-
-The rule here is that every claim shows its number. This is the crack underneath
-one of those numbers.
-
----
+Nothing outstanding. The three gaps this file opened with have shipped; when
+the next one turns up it goes here, in the same shape — what the gap is, why it
+matters, what it would take.
 
 ## Not doing, and why
 

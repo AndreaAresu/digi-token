@@ -36,6 +36,13 @@ struct CoachReport: Sendable {
     var medianSession = 0
     /// Model id carrying the largest share of estimated cost.
     var topModel: String?
+    /// Share of billable tokens spent on models the price table does not know,
+    /// 0...1. Their cost is a guess, so anything read off it is too.
+    var unpricedShare = 0.0
+    /// Those models, biggest first, so the caveat can name them.
+    var unpricedModels: [String] = []
+    /// True when the cost split was too much of a guess to say anything about.
+    var withheldModelMix = false
 }
 
 /// Reads the same events the partner grows on and says where the money goes.
@@ -90,6 +97,15 @@ enum Coach {
     /// Token share below which those cheaper models are effectively idle.
     static let idleTierBar = 0.15
 
+    /// Below this, unpriced models are rounding error on the estimate and not
+    /// worth a line of their own.
+    static let unpricedNoteBar = 0.01
+
+    /// Above this, the cost split is too much guesswork to make a claim about.
+    /// The coach then says nothing about the model mix, and says why — silence
+    /// with a reason beats a confident number nobody can check.
+    static let unpricedClaimBar = 0.10
+
     // MARK: - Report
 
     static func report(events rawEvents: [UsageEvent]) -> CoachReport {
@@ -126,6 +142,17 @@ enum Coach {
             .max { cost($0) < cost($1) }
             .map(\.key)
 
+        // Everything below this line that mentions money depends on the price
+        // table having heard of the model. Work out first how much of the spend
+        // it has not.
+        let unpriced = perModel.filter { !ModelPricing.isKnown($0.key) }
+        report.unpricedShare = ratio(
+            unpriced.values.reduce(0) { $0 + $1.billable }, totals.billable
+        )
+        report.unpricedModels = unpriced
+            .sorted { $0.value.billable > $1.value.billable }
+            .map(\.key)
+
         guard report.sessions >= minSessions, report.billable >= minBillable else {
             report.isTooEarly = true
             return report
@@ -135,7 +162,13 @@ enum Coach {
         if let item = cacheReuse(report) { advice.append(item) }
         if let item = cacheAmortisation(report, totals: totals) { advice.append(item) }
         if let item = sessionLength(report, totals: totals) { advice.append(item) }
-        if let item = modelMix(perModel) { advice.append(item) }
+
+        // The other three rules read token counts, which are measured. Only this
+        // one reads money, which is estimated — so it is the only one the price
+        // table can invalidate.
+        let topIsGuessed = report.topModel.map { !ModelPricing.isKnown($0) } ?? false
+        report.withheldModelMix = topIsGuessed || report.unpricedShare >= unpricedClaimBar
+        if !report.withheldModelMix, let item = modelMix(perModel) { advice.append(item) }
 
         report.advice = advice.sorted { $0.severity > $1.severity }
         return report

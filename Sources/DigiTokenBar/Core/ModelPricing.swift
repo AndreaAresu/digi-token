@@ -26,14 +26,32 @@ enum ModelPricing {
         ("o3", Rate(input: 2, output: 8, cacheWrite: 2, cacheRead: 0.50)),
     ]
 
+    /// What an unrecognised model is priced at, so a cost estimate is never
+    /// simply absent. It is a guess, and everything that reads it has to be able
+    /// to find out that it is one — see `isKnown`.
     private static let fallback = Rate(input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.30)
 
-    static func rate(for model: String) -> Rate {
+    private static func match(_ model: String) -> Rate? {
         let lowered = model.lowercased()
         for entry in table where lowered.contains(entry.pattern) {
             return entry.rate
         }
-        return fallback
+        return nil
+    }
+
+    static func rate(for model: String) -> Rate {
+        match(model) ?? fallback
+    }
+
+    /// Whether the table recognises this model at all.
+    ///
+    /// The fallback used to be invisible: a model id nobody had added yet was
+    /// priced like a Sonnet and nothing said so. That is fine for a rough total
+    /// and not fine for the coach, which claims *which* model is carrying the
+    /// bill — a guessed rate on enough tokens can change the answer. Anything
+    /// making a claim about cost asks this first.
+    static func isKnown(_ model: String) -> Bool {
+        match(model) != nil
     }
 
     static func cost(model: String, counts: TokenCounts) -> Double {
